@@ -31,6 +31,7 @@ class ProductFacts(BaseModel):
     specs: dict[str, str] = Field(default_factory=dict)
     source_tier: SourceTier
     review_count: int | None = Field(default=None, ge=0)
+    category: str | None = None
 
 
 class SourceFailure(BaseModel):

@@ -21,11 +21,14 @@ from app.pipeline.sources import scraper_tier2 as scraper_tier2_module
 from app.pipeline.sources.scraper_tier2 import (
     ProductPageParseError,
     ScraperTier2Source,
+    _extract_category,
     _extract_review_count,
     _parse_price_text,
     build_proxy_config,
+    build_search_url,
     parse_product_facts,
     parse_reviews,
+    parse_search_results,
 )
 from app.settings import Settings
 
@@ -517,3 +520,238 @@ def test_fetch_reviews_returns_empty_list_when_page_has_no_reviews():
     result = asyncio.run(source.fetch_reviews("https://www.amazon.com/dp/B08N5WRWNW"))
 
     assert result == []
+
+
+# -- _extract_category() --------------------------------------------------
+
+
+def test_extract_category_returns_last_breadcrumb_entry():
+    soup = BeautifulSoup(
+        """
+        <ul id="wayfinding-breadcrumbs_feedback">
+          <li><a>Electronics</a></li>
+          <li><a>Smart Home</a></li>
+          <li><a>Smart Speakers</a></li>
+        </ul>
+        """,
+        "html.parser",
+    )
+
+    assert _extract_category(soup) == "Smart Speakers"
+
+
+def test_extract_category_none_when_breadcrumb_missing():
+    soup = BeautifulSoup(
+        "<html><body><span id='productTitle'>X</span></body></html>", "html.parser"
+    )
+
+    assert _extract_category(soup) is None
+
+
+def test_parse_product_facts_wires_category_from_breadcrumb():
+    html = """
+    <html><body>
+      <span id="productTitle">Widget</span>
+      <ul id="wayfinding-breadcrumbs_feedback">
+        <li><a>Electronics</a></li>
+        <li><a>Smart Speakers</a></li>
+      </ul>
+    </body></html>
+    """
+    canonical_id = canonicalize("https://www.amazon.com/dp/B08N5WRWNW")
+
+    facts = parse_product_facts(html, canonical_id)
+
+    assert facts.category == "Smart Speakers"
+
+
+def test_parse_product_facts_category_none_when_breadcrumb_missing():
+    html = "<html><body><span id='productTitle'>Widget</span></body></html>"
+    canonical_id = canonicalize("https://www.amazon.com/dp/B08N5WRWNW")
+
+    facts = parse_product_facts(html, canonical_id)
+
+    assert facts.category is None
+
+
+# -- build_search_url() ---------------------------------------------------
+
+
+def test_build_search_url_encodes_category_as_k_query_param():
+    url = build_search_url("Smart Speakers")
+
+    assert url == "https://www.amazon.com/s?k=Smart+Speakers"
+
+
+def test_build_search_url_encodes_special_characters():
+    url = build_search_url("Cables & Adapters")
+
+    assert "k=Cables" in url
+    assert "%26" in url  # "&" is percent-encoded, not left to break the query string
+
+
+# -- parse_search_results() ------------------------------------------------
+
+
+def test_parse_search_results_parses_well_formed_cards():
+    html = _read_fixture("amazon_search_results.html")
+
+    results = parse_search_results(html, "Smart Speakers")
+
+    assert len(results) == 3
+    assert all(isinstance(r, ProductFacts) for r in results)
+    assert all(r.category == "Smart Speakers" for r in results)
+    assert all(r.source_tier == SourceTier.TIER_2 for r in results)
+
+    first = results[0]
+    assert first.canonical_product_id == "amazon:B08N5WRWNW"
+    assert "Charcoal" in first.title
+    assert first.price == pytest.approx(39.99)
+
+
+def test_parse_search_results_skips_card_missing_price():
+    html = _read_fixture("amazon_search_results.html")
+
+    results = parse_search_results(html, "Smart Speakers")
+
+    assert not any("No Listed Price" in r.title for r in results)
+
+
+def test_parse_search_results_skips_card_missing_title():
+    html = _read_fixture("amazon_search_results.html")
+
+    results = parse_search_results(html, "Smart Speakers")
+
+    assert "amazon:B0888888YY" not in [r.canonical_product_id for r in results]
+
+
+def test_parse_search_results_skips_card_with_no_link():
+    html = _read_fixture("amazon_search_results.html")
+
+    results = parse_search_results(html, "Smart Speakers")
+
+    assert not any("Sponsored Placeholder" in r.title for r in results)
+
+
+def test_parse_search_results_skips_card_with_uncanonicalizable_link():
+    html = """
+    <html><body>
+      <div data-component-type="s-search-result">
+        <h2><a href="/some/non-amazon-shape/path"><span>Weird Listing</span></a></h2>
+        <span class="a-price"><span class="a-offscreen">$19.99</span></span>
+      </div>
+    </body></html>
+    """
+
+    assert parse_search_results(html, "Widgets") == []
+
+
+def test_parse_search_results_skips_card_with_absolute_off_amazon_href():
+    # An absolute href pointing off-Amazon entirely must be skipped via
+    # canonicalize()'s InvalidProductURLError path, not raise.
+    html = """
+    <html><body>
+      <div data-component-type="s-search-result">
+        <h2><a href="https://some-other-site.com/product"><span>Off-Site Listing</span></a></h2>
+        <span class="a-price"><span class="a-offscreen">$19.99</span></span>
+      </div>
+    </body></html>
+    """
+
+    assert parse_search_results(html, "Widgets") == []
+
+
+def test_parse_search_results_returns_empty_list_when_no_cards_present():
+    assert parse_search_results("<html><body>No results</body></html>", "Widgets") == []
+
+
+# -- ScraperTier2Source.find_candidate_alternatives() ----------------------
+
+
+def test_find_candidate_alternatives_returns_parsed_candidates_via_stubbed_render():
+    source = ScraperTier2Source(settings=Settings(scraper_proxy_url=None))
+    html = _read_fixture("amazon_search_results.html")
+
+    async def fake_render(url: str, wait_selector: str = "#productTitle") -> str:
+        return html
+
+    source._render = fake_render  # type: ignore[method-assign]
+
+    result = asyncio.run(source.find_candidate_alternatives("Smart Speakers"))
+
+    assert isinstance(result, list)
+    assert len(result) == 3
+    assert all(isinstance(r, ProductFacts) for r in result)
+    assert all(r.category == "Smart Speakers" for r in result)
+
+
+def test_find_candidate_alternatives_returns_empty_list_and_never_raises_when_render_fails(
+    monkeypatch,
+):
+    monkeypatch.setattr(scraper_tier2_module.asyncio, "sleep", _no_delay_sleep)
+
+    source = ScraperTier2Source(settings=Settings(scraper_proxy_url=None))
+
+    call_count = 0
+
+    async def failing_render(url: str, wait_selector: str = "#productTitle") -> str:
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("search page blocked")
+
+    source._render = failing_render  # type: ignore[method-assign]
+
+    result = asyncio.run(source.find_candidate_alternatives("Smart Speakers"))
+
+    assert result == []
+    # one initial attempt + one retry (AD-9), never an unhandled exception
+    assert call_count == 2
+
+
+def test_find_candidate_alternatives_degrades_to_empty_list_when_render_times_out(
+    monkeypatch,
+):
+    monkeypatch.setattr(scraper_tier2_module, "_FETCH_TIMEOUT_SECONDS", 0.05)
+
+    source = ScraperTier2Source(settings=Settings(scraper_proxy_url=None))
+
+    async def hanging_render(url: str, wait_selector: str = "#productTitle") -> str:
+        await asyncio.sleep(10)
+        return "<html></html>"
+
+    source._render = hanging_render  # type: ignore[method-assign]
+
+    result = asyncio.run(source.find_candidate_alternatives("Smart Speakers"))
+
+    assert result == []
+
+
+def test_find_candidate_alternatives_returns_empty_list_when_search_page_has_no_results():
+    source = ScraperTier2Source(settings=Settings(scraper_proxy_url=None))
+
+    async def no_results_render(url: str, wait_selector: str = "#productTitle") -> str:
+        return "<html><body>No results found.</body></html>"
+
+    source._render = no_results_render  # type: ignore[method-assign]
+
+    result = asyncio.run(source.find_candidate_alternatives("Smart Speakers"))
+
+    assert result == []
+
+
+def test_find_candidate_alternatives_builds_url_from_category_and_passes_search_wait_selector():
+    source = ScraperTier2Source(settings=Settings(scraper_proxy_url=None))
+
+    seen: dict = {}
+
+    async def capturing_render(url: str, wait_selector: str = "#productTitle") -> str:
+        seen["url"] = url
+        seen["wait_selector"] = wait_selector
+        return "<html></html>"
+
+    source._render = capturing_render  # type: ignore[method-assign]
+
+    asyncio.run(source.find_candidate_alternatives("Smart Speakers"))
+
+    assert seen["url"] == build_search_url("Smart Speakers")
+    assert seen["wait_selector"] == '[data-component-type="s-search-result"]'

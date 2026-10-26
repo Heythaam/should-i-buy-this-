@@ -16,6 +16,7 @@ import asyncio
 import logging
 import re
 from datetime import date, datetime
+from urllib.parse import quote_plus, urljoin
 
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
@@ -30,6 +31,13 @@ logger = logging.getLogger(__name__)
 _FETCH_TIMEOUT_SECONDS = 20.0
 _MAX_ATTEMPTS = 2  # first attempt + one retry (AD-9)
 _RETRY_DELAY_SECONDS = 1.0
+
+# Domain the search-based alternatives lookup runs against. Matches the one
+# `canonicalize()` and the fixture product pages already target -- v1 is
+# Amazon-only, so a single locale's search endpoint is sufficient (see the
+# architecture's "Non-Amazon retailers" deferral).
+_SEARCH_BASE_URL = "https://www.amazon.com"
+_SEARCH_RESULT_SELECTOR = '[data-component-type="s-search-result"]'
 
 
 class ProductPageParseError(Exception):
@@ -138,6 +146,21 @@ def _extract_review_count(soup: BeautifulSoup) -> int | None:
         return None
 
 
+def _extract_category(soup: BeautifulSoup) -> str | None:
+    """Parse the page's breadcrumb trail and return its most specific entry.
+
+    The breadcrumb's last `<a>` (e.g. "Smart Speakers", not the top-level
+    "Electronics") is what should drive the alternatives search query --
+    see this story's Design Notes. Returns `None` -- rather than guessing --
+    when the breadcrumb is absent.
+    """
+    breadcrumb_links = soup.select("#wayfinding-breadcrumbs_feedback li a")
+    if not breadcrumb_links:
+        return None
+    text = breadcrumb_links[-1].get_text(strip=True)
+    return text or None
+
+
 def _extract_specs(soup: BeautifulSoup) -> dict[str, str]:
     specs: dict[str, str] = {}
     for row in soup.select("#productDetails_techSpec_section_1 tr"):
@@ -171,6 +194,7 @@ def parse_product_facts(html: str, canonical_id: CanonicalProductId) -> ProductF
         specs=_extract_specs(soup),
         source_tier=SourceTier.TIER_2,
         review_count=_extract_review_count(soup),
+        category=_extract_category(soup),
     )
 
 
@@ -273,6 +297,90 @@ def parse_reviews(html: str) -> list[Review]:
     return reviews
 
 
+def build_search_url(category: str) -> str:
+    """Build an Amazon search-results URL for `category`.
+
+    Pure, mirrors `build_proxy_config`: a plain string transform, no I/O.
+    """
+    return f"{_SEARCH_BASE_URL}/s?k={quote_plus(category)}"
+
+
+def _extract_search_result_title(card) -> str | None:
+    title_el = card.select_one("h2 a span") or card.select_one("h2 span")
+    if not title_el:
+        return None
+    text = title_el.get_text(strip=True)
+    return text or None
+
+
+def _extract_search_result_price(card) -> float | None:
+    price_el = card.select_one(".a-price .a-offscreen")
+    if not price_el:
+        return None
+    return _parse_price_text(price_el.get_text(strip=True))
+
+
+def _extract_search_result_link(card) -> str | None:
+    """Try each selector in turn, falling through when a match lacks a
+    usable `href` rather than stopping at the first element found."""
+    for selector in ("h2 a", "a.a-link-normal"):
+        link_el = card.select_one(selector)
+        href = link_el.get("href") if link_el else None
+        if href:
+            return href
+    return None
+
+
+def parse_search_results(html: str, category: str) -> list[ProductFacts]:
+    """Parse a rendered Amazon search-results page into candidate `ProductFacts`.
+
+    Playwright-free, mirrors `parse_product_facts`. Never raises: a
+    `[data-component-type="s-search-result"]` card missing a parseable
+    title, price, or canonicalizable link is skipped -- other cards on the
+    same page are still parsed (AD-4). Each result's relative product link
+    is resolved to an absolute URL against the search domain before being
+    passed through `canonicalize()`, which requires one.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    results: list[ProductFacts] = []
+    for card in soup.select(_SEARCH_RESULT_SELECTOR):
+        title = _extract_search_result_title(card)
+        price = _extract_search_result_price(card)
+        href = _extract_search_result_link(card)
+        if not title or price is None or not href:
+            logger.debug(
+                "scraper_tier2 parse_search_results skipped a card "
+                "(title=%r, price=%r, href=%r)",
+                title,
+                price,
+                href,
+            )
+            continue
+
+        absolute_url = urljoin(_SEARCH_BASE_URL, href)
+        try:
+            canonical_id = canonicalize(absolute_url)
+        except InvalidProductURLError:
+            logger.debug(
+                "scraper_tier2 parse_search_results skipped a card with an "
+                "uncanonicalizable link: %r",
+                href,
+            )
+            continue
+
+        results.append(
+            ProductFacts(
+                canonical_product_id=str(canonical_id),
+                title=title,
+                price=price,
+                source_tier=SourceTier.TIER_2,
+                category=category,
+            )
+        )
+    return results
+
+
 class ScraperTier2Source:
     """Tier 2 `ProductSource`: Playwright render + BeautifulSoup parse."""
 
@@ -365,7 +473,63 @@ class ScraperTier2Source:
         )
         return []
 
-    async def _render(self, url: str, wait_for_reviews: bool = False) -> str:
+    async def find_candidate_alternatives(self, category: str) -> list[ProductFacts]:
+        """Search Amazon for `category` and parse candidate `ProductFacts`.
+
+        Reuses the render/retry/timeout pattern shared with `fetch()` and
+        `fetch_reviews()`. Never raises (AD-4, AD-9): exhausting retries
+        degrades to `[]`, the same honest-failure principle as
+        `fetch_reviews()` -- a search page is never a `SourceFailure`-level
+        concern the way a single product page is.
+        """
+        if not category:
+            return []
+
+        url = build_search_url(category)
+
+        last_error: Exception | None = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            try:
+                html = await asyncio.wait_for(
+                    self._render(url, wait_selector=_SEARCH_RESULT_SELECTOR),
+                    timeout=_FETCH_TIMEOUT_SECONDS,
+                )
+                results = parse_search_results(html, category)
+                logger.info(
+                    "scraper_tier2 find_candidate_alternatives succeeded for "
+                    "category %r: %s result(s)",
+                    category,
+                    len(results),
+                )
+                return results
+            except Exception as exc:  # noqa: BLE001 -- AD-4/AD-9: never raises out
+                last_error = exc
+                logger.warning(
+                    "scraper_tier2 find_candidate_alternatives attempt %s/%s "
+                    "failed for category %r: %s",
+                    attempt,
+                    _MAX_ATTEMPTS,
+                    category,
+                    exc,
+                )
+                if attempt < _MAX_ATTEMPTS:
+                    await asyncio.sleep(_RETRY_DELAY_SECONDS)
+
+        logger.error(
+            "scraper_tier2 find_candidate_alternatives giving up after %s "
+            "attempts for category %r: %s",
+            _MAX_ATTEMPTS,
+            category,
+            last_error,
+        )
+        return []
+
+    async def _render(
+        self,
+        url: str,
+        wait_for_reviews: bool = False,
+        wait_selector: str = "#productTitle",
+    ) -> str:
         proxy = build_proxy_config(self._settings.scraper_proxy_url)
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(proxy=proxy)
@@ -374,8 +538,10 @@ class ScraperTier2Source:
                 await page.goto(url, wait_until="domcontentloaded")
                 # Give JS-injected price/spec data a moment to hydrate before
                 # reading the DOM, rather than racing it right after the
-                # bare "domcontentloaded" navigation event.
-                await page.wait_for_selector("#productTitle", timeout=5000)
+                # bare "domcontentloaded" navigation event. `wait_selector`
+                # lets callers targeting a different page shape (e.g. a
+                # search-results page) wait on their own landmark element.
+                await page.wait_for_selector(wait_selector, timeout=5000)
                 if wait_for_reviews:
                     # The review widget can hydrate later than the rest of
                     # the page. Give it a short, best-effort grace period --
