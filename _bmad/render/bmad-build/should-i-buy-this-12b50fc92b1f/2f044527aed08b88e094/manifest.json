@@ -1,0 +1,78 @@
+{
+  "generation_hash": "2f044527aed08b88e094",
+  "inputs": {
+    "project_root": "C:\\Users\\MAJDADDIN\\Desktop\\ShouldIBuyThis\\should-i-buy-this-",
+    "renderer_sha256": "b7beeeb6b6886b5452b14ef04fe4b866da44dd4100baa93f92d2d023a9ab4672",
+    "resolved_values": {
+      "config.modules.bmm.implementation_artifacts": "C:\\Users\\MAJDADDIN\\Desktop\\ShouldIBuyThis\\should-i-buy-this-/_bmad-output/implementation-artifacts",
+      "config.modules.bmm.planning_artifacts": "C:\\Users\\MAJDADDIN\\Desktop\\ShouldIBuyThis\\should-i-buy-this-/_bmad-output/planning-artifacts",
+      "customization.workflow.activation_steps_append": [],
+      "customization.workflow.activation_steps_prepend": [],
+      "customization.workflow.implementation_handoff": "Launch a subagent with no prior conversation context, with this prompt:\n\n> Read {spec_file} fully and implement it — the spec is the sole source of truth. Load every file listed in its frontmatter `context:` before you start.\n>\n> When done, report what you changed, how you verified it, and anything left incomplete or risky.\n",
+      "customization.workflow.on_complete": "",
+      "customization.workflow.oneshot_review_layers": [
+        {
+          "id": "blind-hunter",
+          "instruction": "Launch a context-free subagent with this prompt:\n\nConduct a review of CONTENT.\nLook for what's missing, not only what's wrong.\nCompute your finding floor N from the size of the changes: N = min(floor(sqrt(kB) + 1), 10), where kB is the changed content's size in kilobytes. State the arithmetic in one line, then find at least N issues to fix or improve.\nOutput a Markdown list of findings only — no severity, priority, or ranking.\nIf the content is empty, stop and say so.\nIf you have zero findings, re-check and keep thinking; do not stop with an empty list.\n\nCONTENT:\nThe changed files in the current worktree. Inspect them directly before reviewing.\n\nDo not invoke any skill, and do not spawn subagents of your own — you are the reviewer. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.\n\n",
+          "name": "Blind Hunter"
+        }
+      ],
+      "customization.workflow.open_spec": "",
+      "customization.workflow.persistent_facts": [],
+      "customization.workflow.review_layers": [
+        {
+          "id": "blind-hunter",
+          "instruction": "Launch a context-free subagent with this prompt:\n\nConduct a review of CONTENT.\nLook for what's missing, not only what's wrong.\nCompute your finding floor N from the diff file's size: N = min(floor(sqrt(kB) + 1), 10), where kB is the file's size in kilobytes. State the arithmetic in one line, then find at least N issues to fix or improve.\nOutput a Markdown list of findings only — no severity, priority, or ranking.\nIf the content is empty, stop and say so.\nIf you have zero findings, re-check and keep thinking; do not stop with an empty list.\n\nCONTENT: the unified diff at `{diff_file}`. Read that file — it is the content under review.\n\nDo not invoke any skill, and do not spawn subagents of your own — you are the reviewer. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.\n\n",
+          "name": "Blind Hunter"
+        },
+        {
+          "id": "edge-case-hunter",
+          "instruction": "Launch a context-free subagent with this prompt:\n\nRead `{skill-root}/review-prompts/edge-case-hunter.md` completely and follow it as your review instructions.\n\nclaims_file (leave unread until your instructions call for it): {claims_file}\n\nReview content: the unified diff at `{diff_file}`. Read that file — it is the content under review.\n\nDo not invoke any skill, and do not spawn subagents of your own — you are the reviewer. If the instruction file is unreadable, report that exact failure and stop. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.\n\n",
+          "name": "Edge Case Hunter"
+        },
+        {
+          "id": "verification-gap",
+          "instruction": "Launch a context-free subagent with this prompt:\n\nRead `{skill-root}/review-prompts/verification-gap.md` completely and follow it as your review instructions.\n\nReview content: the unified diff at `{diff_file}`. Read that file — it is the content under review.\n\nDo not invoke any skill, and do not spawn subagents of your own — you are the reviewer. If the instruction file is unreadable, report that exact failure and stop. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.\n\n",
+          "name": "Verification Gap Reviewer"
+        }
+      ]
+    },
+    "source_sha256": {
+      "compile-epic-context.md": "6793b15ae85766cee529e6b349e45f2c6ec9e3212019611c29e8c77b4dc4b924",
+      "references/claims-check.md": "50ea17cb89a78ef815286dde2dabfd09f1dc9841d07a10857f88b39ab7b9bd2a",
+      "references/deletion-check.md": "0f1f124e4e957147e89164a272b10bedc694ad0d9ad2618c8610ac74ee9cb0da",
+      "review-prompts/edge-case-hunter.md": "8fc046af1cbf4ecc928207cec75e29c3c260adb86cc7da77537ade3b3a3b9448",
+      "review-prompts/verification-gap.md": "45ab0b8c4c56c5c055c97a293a8591a67e256d0b1a2058ce1f093cd866be8d03",
+      "spec-template.md": "e217325964857ebd90a9508bf171eddc2c4ad1b0b9b32a119775ac5c015695fd",
+      "step-01-clarify-and-route.md": "e36bdc7508025f71b94224dd2d6fb10bd9a08f47e93a3fb2c3726bfb2936a46b",
+      "step-02-plan.md": "8b99d5404a31fae38b5b64bcfbf08e620186aa026ade4abaca9b6fe57b082f33",
+      "step-03-implement.md": "9ff7e4c1e61c98c4fa5a719743b50acbfb3c9ce1eee912cd3d9878be510ef312",
+      "step-04-review.md": "8c96b9daf45658507ed10fbe096b74ebe514df068413286bad3d70b6211e2022",
+      "step-05-present.md": "281efed9ebdebbe9842fb2ad0495f9e08d1003fa3d05670c529df815fb96a0ca",
+      "step-oneshot.md": "6bad4230893b5f7be08d43b81d3f4d8d6e825d872b1c4fdafcc208b9a04fe078",
+      "sync-sprint-status.md": "7ff44d21f5d813f4993780271eec8df2fce1373f525ff80e595b7c10618c4c36",
+      "workflow.md": "481ff00ef349a9c7845feca02bbfd5722b1e318ccabac858355da6c90c2d8a39"
+    }
+  },
+  "outputs": {
+    "compile-epic-context.md": "6793b15ae85766cee529e6b349e45f2c6ec9e3212019611c29e8c77b4dc4b924",
+    "references/claims-check.md": "50ea17cb89a78ef815286dde2dabfd09f1dc9841d07a10857f88b39ab7b9bd2a",
+    "references/deletion-check.md": "0f1f124e4e957147e89164a272b10bedc694ad0d9ad2618c8610ac74ee9cb0da",
+    "review-prompts/edge-case-hunter.md": "8fc046af1cbf4ecc928207cec75e29c3c260adb86cc7da77537ade3b3a3b9448",
+    "review-prompts/verification-gap.md": "45ab0b8c4c56c5c055c97a293a8591a67e256d0b1a2058ce1f093cd866be8d03",
+    "spec-template.md": "e217325964857ebd90a9508bf171eddc2c4ad1b0b9b32a119775ac5c015695fd",
+    "step-01-clarify-and-route.md": "54256ae07b039c04df20117947ff91391203c6e6504ac980c24b22aad3201635",
+    "step-02-plan.md": "2d744a377682817c9caa666b3013b5ed31f57c3c066fb8ddcaa6356cb0f08430",
+    "step-03-implement.md": "fab31ffa11fdc5cc324106dff894747ed6bffbc26a79e152cf03366a2831b76f",
+    "step-04-review.md": "8db0865eedc80be6a6758c161d8c943d81dc925347af53704c411147e4ce0afb",
+    "step-05-present.md": "1b2f9b05efe118a7a52d6c4e677e3b21a4eb3b07f7e5e3d1d8843d13da975e22",
+    "step-oneshot.md": "5c902f9f503e59177bb31ac149351de1c327e3b3cd6ddf7708d27bc642e481f8",
+    "sync-sprint-status.md": "4830aafad68929fc2086608ac1dff9aecc23df0a841b05e77197982d102e09fa",
+    "workflow.md": "e97f8a0093e9a5bc1200897f4cfe268626497f79cda6729f152161d8dd0afd5b"
+  },
+  "project_root": "C:\\Users\\MAJDADDIN\\Desktop\\ShouldIBuyThis\\should-i-buy-this-",
+  "project_slug": "should-i-buy-this",
+  "root_hash": "12b50fc92b1f",
+  "schema_version": 1,
+  "skill": "bmad-build"
+}

@@ -1,5 +1,5 @@
 ---
-stepsCompleted: [1, 2, 3-epic1, 3-epic2]
+stepsCompleted: [1, 2, 3-epic1, 3-epic2, 3-epic3, 3-epic4]
 inputDocuments: ['docs/prds/prd-should-i-buy-this-2026-10-26/prd.md', 'docs/architecture/architecture-should-i-buy-this-2026-10-26/ARCHITECTURE-SPINE.md', 'brainstorm-intent.md', 'docs/prds/prd-should-i-buy-this-2026-10-26/addendum.md']
 ---
 
@@ -329,3 +329,103 @@ So that I don't trust a potentially-inflated review score.
 **Given** no meaningful divergence
 **When** compared
 **Then** the flag is false and no false alarm is shown.
+
+## Epic 3: Multi-Persona Trust
+
+The verdict is now reasoned from 2-3 independent personas assessing the same evidence; when they disagree, that disagreement is surfaced rather than silently resolved.
+
+**FRs covered:** FR-10
+
+### Story 3.1: Reason from multiple independent personas
+
+As a user,
+I want the verdict reasoned from 2-3 independent personas assessing the same evidence,
+So that a single model's quirks don't masquerade as a settled answer.
+
+**Acceptance Criteria:**
+
+**Given** a complete Evidence Bundle
+**When** synthesis runs
+**Then** 2-3 distinct Reasoning Personas (e.g. value buyer, longevity-focused, tech-specs reader) each independently assess it.
+
+**Given** persona results are produced
+**When** the Verdict is assembled
+**Then** `persona_results` holds each persona's individual assessment.
+
+### Story 3.2: Surface disagreement instead of hiding it
+
+As a user,
+I want to know when the personas disagree on Buy/Skip/Wait,
+So that I can see genuine ambiguity instead of a falsely confident single answer.
+
+**Acceptance Criteria:**
+
+**Given** persona results with different verdict labels
+**When** the Verdict is assembled
+**Then** `persona_disagreement: true` is set.
+
+**Given** persona results all agree
+**When** the Verdict is assembled
+**Then** `persona_disagreement: false` is set.
+
+**Given** `persona_disagreement` is true
+**When** I view the result
+**Then** the UI visibly communicates the disagreement rather than silently picking one persona's answer.
+
+## Epic 4: Don't Make Me Wait Twice
+
+Repeat checks on the same product are instant, concurrent requests for the same product don't duplicate work, and the user is told if the verdict changed since they last looked.
+
+**FRs covered:** FR-13, FR-14
+
+### Story 4.1: Reuse a cached verdict instead of recomputing it
+
+As a user,
+I want a repeat check on a product I already looked up to return instantly,
+So that I don't wait through the full pipeline again for no new information.
+
+**Acceptance Criteria:**
+
+**Given** a Canonical Product with a completed Evidence Bundle/Verdict cached within the TTL window (~48h default)
+**When** I submit its URL again
+**Then** the cached Verdict is returned synchronously, no job is created, and no SSE connection is opened.
+
+**Given** a cached Verdict is returned
+**When** I view it
+**Then** it carries the timestamp of when it was originally computed.
+
+**Given** the cache entry has expired past the TTL
+**When** I submit the URL
+**Then** the full pipeline re-runs rather than serving stale data.
+
+### Story 4.2: Know if the verdict changed since I last looked
+
+As a user,
+I want to be told whether a cached verdict has changed since my last visit,
+So that I don't have to re-read the whole thing to spot what's different.
+
+**Acceptance Criteria:**
+
+**Given** a cached Verdict I've seen before
+**When** I view it again unchanged
+**Then** it indicates nothing has changed since my last visit.
+
+**Given** the cache was refreshed with a new Verdict since my last visit
+**When** I view it
+**Then** it indicates the verdict has changed since I last looked.
+
+### Story 4.3: Share one evidence-gathering pass across concurrent requests
+
+As a user,
+I want concurrent requests for the same product to share a single pipeline run,
+So that the system doesn't waste time and cost re-scraping and re-querying in parallel for the same thing.
+
+**Acceptance Criteria:**
+
+**Given** two requests for the same Canonical Product arrive while no cached Verdict exists yet
+**When** the second request arrives
+**Then** it attaches to the in-flight job's SSE stream rather than starting a second pipeline run.
+
+**Given** the in-flight job completes
+**When** it resolves
+**Then** both requests receive the same Verdict and the result is cached for subsequent requests.
