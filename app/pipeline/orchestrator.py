@@ -4,9 +4,10 @@
 became `ProductFacts` or the FR-3-level `InsufficientDataResult` (AD-4): it
 calls `canonicalize()` then `source.fetch()`, and never lets a
 `canonicalize()` exception or a `SourceFailure` propagate past itself
-unconverted. No FastAPI app or LLM synthesis exists yet, so "a failure never
-reaches synthesis" holds structurally -- this function has no code path that
-calls one.
+unconverted. Taken on its own, `resolve_product_facts()` has no code path
+that calls LLM synthesis, so "a failure never reaches synthesis" holds
+structurally for it; `produce_verdict()` below is what actually wires this
+function's result into `synthesize_verdict()`, short-circuiting first.
 
 `assemble_evidence_bundle()` (Story 1.6) composes `resolve_product_facts()`
 with Story 1.3-1.5's review/alternatives functions into one `EvidenceBundle`
@@ -15,20 +16,31 @@ reuses those functions exactly as they are; its only logic is the
 short-circuit-on-insufficient-data sequencing (see this story's spec Design
 Notes).
 
-Intentionally minimal (two functions) rather than building out job/queue/SSE
-machinery now -- that belongs to Story 1.9 (AD-10); AD-11 lets that story
-extend this same file in place.
+`produce_verdict()` (Story 1.7) composes `assemble_evidence_bundle()` with
+`pipeline/synthesis.py::synthesize_verdict()` into the complete end-to-end
+v1 pipeline: canonicalize -> extract facts -> sample reviews -> find
+alternatives -> assemble Evidence Bundle -> LLM synthesis -> compute
+confidence -> `Verdict`. It short-circuits on an `InsufficientDataResult`
+from either stage -- a failed/insufficient Evidence Bundle never reaches
+`synthesize_verdict()` (AD-4).
+
+Intentionally minimal (three functions) rather than building out
+job/queue/SSE machinery now -- that belongs to Story 1.9 (AD-10); AD-11 lets
+that story extend this same file in place.
 """
 
 import logging
 
 from app.models.evidence import EvidenceBundle
 from app.models.product import InsufficientDataResult, ProductFacts, SourceFailure
+from app.models.verdict import Verdict
 from app.pipeline.alternatives import select_alternatives
 from app.pipeline.canonicalize import InvalidProductURLError, canonicalize
+from app.pipeline.llm_client import LLMClient
 from app.pipeline.review_sampling import sample_reviews
 from app.pipeline.review_signal import assess_review_signal
 from app.pipeline.sources.base import ProductSource
+from app.pipeline.synthesis import synthesize_verdict
 
 logger = logging.getLogger(__name__)
 
@@ -122,3 +134,21 @@ async def assemble_evidence_bundle(
         review_signal=review_signal,
         alternatives=alternatives,
     )
+
+
+async def produce_verdict(
+    url: str, source: ProductSource, llm: LLMClient
+) -> Verdict | InsufficientDataResult:
+    """Run the complete end-to-end v1 pipeline for `url`.
+
+    Composes `assemble_evidence_bundle()` then `synthesize_verdict()`,
+    short-circuiting on an `InsufficientDataResult` from either -- a failed
+    or insufficient Evidence Bundle is returned unchanged, before
+    `synthesize_verdict()` (and therefore any LLM call) is ever invoked
+    (AD-4).
+    """
+    bundle_or_insufficient = await assemble_evidence_bundle(url, source)
+    if isinstance(bundle_or_insufficient, InsufficientDataResult):
+        return bundle_or_insufficient
+
+    return await synthesize_verdict(bundle_or_insufficient, llm)

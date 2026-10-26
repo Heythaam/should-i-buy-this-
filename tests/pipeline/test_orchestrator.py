@@ -10,9 +10,15 @@ import asyncio
 import pytest
 
 from app.models.evidence import EvidenceBundle
+from app.models.llm import DraftVerdict, LLMCallFailure, ThemeClusters
 from app.models.product import InsufficientDataResult, ProductFacts, SourceFailure, SourceTier
 from app.models.review import Review
-from app.pipeline.orchestrator import assemble_evidence_bundle, resolve_product_facts
+from app.models.verdict import Citation, ProConItem, Verdict, VerdictLabel
+from app.pipeline.orchestrator import (
+    assemble_evidence_bundle,
+    produce_verdict,
+    resolve_product_facts,
+)
 
 VALID_URL = "https://www.amazon.com/dp/B08N5WRWNW"
 
@@ -261,3 +267,77 @@ def test_product_with_empty_string_category_returns_empty_alternatives_without_r
     # which guards it identically to `None` (Story 1.5) -- no extra guard
     # needed here, and no exception propagates.
     assert source.find_candidate_alternatives_calls == [""]
+
+
+# -- produce_verdict() ----------------------------------------------------
+#
+# Covers the end-to-end composition/short-circuit behavior added by this
+# story: `assemble_evidence_bundle()` then `synthesize_verdict()`, with the
+# `InsufficientDataResult` short-circuit from either stage.
+
+
+def _themes() -> ThemeClusters:
+    return ThemeClusters(pros_themes=["good sound"], cons_themes=["short battery life"])
+
+
+def _resolvable_draft() -> DraftVerdict:
+    return DraftVerdict(
+        label=VerdictLabel.BUY,
+        confidence=0.42,
+        pros=[
+            ProConItem(
+                text="Great sound",
+                citation=Citation(source_type="review", source_index=0, quote="Great product."),
+            )
+        ],
+        cons=[],
+        reasoning_summary="Positive signal.",
+    )
+
+
+def test_produce_verdict_happy_path_composes_bundle_assembly_and_synthesis(stub_llm_client):
+    facts = _facts(category="Smart Speakers", review_count=25)
+    reviews = [_review(rating=5)]
+    source = _StubSource(facts, reviews=reviews)
+    llm = stub_llm_client([_themes(), _resolvable_draft()])
+
+    result = asyncio.run(produce_verdict(VALID_URL, source, llm))
+
+    assert isinstance(result, Verdict)
+    assert result.label == VerdictLabel.BUY
+    assert len(llm.calls) == 2
+
+
+def test_produce_verdict_short_circuits_on_insufficient_bundle_without_calling_llm(stub_llm_client):
+    failure = SourceFailure(source_tier=SourceTier.TIER_2, reason="fetch_failed")
+    source = _StubSource(failure)
+    llm = stub_llm_client([_themes(), _resolvable_draft()])
+
+    result = asyncio.run(produce_verdict(VALID_URL, source, llm))
+
+    assert isinstance(result, InsufficientDataResult)
+    assert not isinstance(result, Verdict)
+    assert llm.calls == []  # synthesis never invoked
+
+
+def test_produce_verdict_short_circuits_on_invalid_url_without_calling_llm(stub_llm_client):
+    source = _StubSource(_facts())
+    llm = stub_llm_client([_themes(), _resolvable_draft()])
+
+    result = asyncio.run(produce_verdict("https://www.ebay.com/itm/123456", source, llm))
+
+    assert isinstance(result, InsufficientDataResult)
+    assert result.reason == "invalid_url"
+    assert llm.calls == []
+
+
+def test_produce_verdict_returns_insufficient_data_when_synthesis_fails(stub_llm_client):
+    facts = _facts(category="Smart Speakers", review_count=25)
+    source = _StubSource(facts, reviews=[_review()])
+    failure = LLMCallFailure(reason="llm_call_failed", detail="network error")
+    llm = stub_llm_client([failure])
+
+    result = asyncio.run(produce_verdict(VALID_URL, source, llm))
+
+    assert isinstance(result, InsufficientDataResult)
+    assert result.reason == "llm_call_failed"

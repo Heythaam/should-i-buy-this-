@@ -9,6 +9,7 @@ dependencies = [
     "pydantic-settings>=2.6",
     "playwright~=1.62",
     "beautifulsoup4>=4.12",
+    "openai>=3.39.0",
 ]
 
 [dependency-groups]
