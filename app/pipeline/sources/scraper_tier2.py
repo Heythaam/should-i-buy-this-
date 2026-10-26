@@ -6,19 +6,22 @@ seed. Reads `Settings.scraper_proxy_url` (NFR-1): the proxy is loaded from an
 environment variable, never hardcoded, and simply omitted when unset.
 
 Parsing is factored into module-level, Playwright-free functions
-(`parse_product_facts`, `build_proxy_config`) specifically so tests can
-exercise them against saved HTML fixtures without any live network or
-browser dependency, per this story's "no live-network calls in tests" rule.
+(`parse_product_facts`, `parse_reviews`, `build_proxy_config`) specifically
+so tests can exercise them against saved HTML fixtures without any live
+network or browser dependency, per this story's "no live-network calls in
+tests" rule.
 """
 
 import asyncio
 import logging
 import re
+from datetime import date, datetime
 
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
 from app.models.product import ProductFacts, SourceFailure, SourceTier
+from app.models.review import Review
 from app.pipeline.canonicalize import CanonicalProductId, InvalidProductURLError, canonicalize
 from app.settings import Settings
 
@@ -139,6 +142,105 @@ def parse_product_facts(html: str, canonical_id: CanonicalProductId) -> ProductF
     )
 
 
+_RATING_PATTERN = re.compile(r"([\d.]+)\s*out of\s*5\s*stars", re.IGNORECASE)
+_HELPFUL_VOTES_PATTERN = re.compile(r"(\d+)\s*(?:person|people)", re.IGNORECASE)
+_REVIEW_DATE_FORMAT = "%B %d, %Y"
+
+
+def _extract_review_rating(review_el) -> int | None:
+    rating_el = review_el.select_one('[data-hook="review-star-rating"] .a-icon-alt')
+    if not rating_el:
+        return None
+    match = _RATING_PATTERN.search(rating_el.get_text(strip=True))
+    if not match:
+        return None
+    try:
+        return round(float(match.group(1)))
+    except ValueError:
+        return None
+
+
+def _extract_review_title(review_el) -> str | None:
+    title_el = review_el.select_one('[data-hook="review-title"]')
+    if not title_el:
+        return None
+    text = title_el.get_text(strip=True)
+    return text or None
+
+
+def _extract_review_body(review_el) -> str | None:
+    body_el = review_el.select_one('[data-hook="review-body"]')
+    if not body_el:
+        return None
+    text = body_el.get_text(strip=True)
+    return text or None
+
+
+def _extract_review_helpful_votes(review_el) -> int:
+    """Defaults to `0` when the vote-count text is missing or unparseable."""
+    votes_el = review_el.select_one('[data-hook="helpful-vote-statement"]')
+    if not votes_el:
+        return 0
+    text = votes_el.get_text(strip=True)
+    if re.search(r"\bone\s+person\b", text, re.IGNORECASE):
+        return 1
+    match = _HELPFUL_VOTES_PATTERN.search(text.replace(",", ""))
+    if not match:
+        return 0
+    return int(match.group(1))
+
+
+def _extract_review_date(review_el) -> date | None:
+    """`None` when the date text is missing or doesn't match the expected
+    "... on <Month> <Day>, <Year>" format -- excluded from the recent
+    bucket rather than guessed (AD-4)."""
+    date_el = review_el.select_one('[data-hook="review-date"]')
+    if not date_el:
+        return None
+    text = date_el.get_text(strip=True)
+    _, _, date_text = text.rpartition(" on ")
+    if not date_text:
+        return None
+    try:
+        return datetime.strptime(date_text, _REVIEW_DATE_FORMAT).date()
+    except ValueError:
+        return None
+
+
+def parse_reviews(html: str) -> list[Review]:
+    """Parse rendered review-section HTML into a list of `Review`.
+
+    Playwright-free, mirrors `parse_product_facts`. Never raises: a review
+    block missing a parseable rating or body is skipped rather than
+    fabricating a value (AD-4) -- the page's other reviews are still
+    returned.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    reviews: list[Review] = []
+    for review_el in soup.select('[data-hook="review"]'):
+        rating = _extract_review_rating(review_el)
+        body = _extract_review_body(review_el)
+        if rating is None or not body:
+            logger.debug(
+                "scraper_tier2 parse_reviews skipped a review block "
+                "(rating=%r, body missing=%s)",
+                rating,
+                not body,
+            )
+            continue
+        reviews.append(
+            Review(
+                rating=rating,
+                title=_extract_review_title(review_el),
+                body=body,
+                helpful_votes=_extract_review_helpful_votes(review_el),
+                review_date=_extract_review_date(review_el),
+            )
+        )
+    return reviews
+
+
 class ScraperTier2Source:
     """Tier 2 `ProductSource`: Playwright render + BeautifulSoup parse."""
 
@@ -188,7 +290,50 @@ class ScraperTier2Source:
             detail=str(last_error) if last_error else "unknown error",
         )
 
-    async def _render(self, url: str) -> str:
+    async def fetch_reviews(self, url: str) -> list[Review]:
+        """Fetch and parse `url`'s review section.
+
+        Reuses `fetch()`'s render/retry/timeout budget, but renders the
+        page independently of `fetch()` rather than sharing one render (a
+        real double page-load cost for v1 -- see this story's Design
+        Notes). Unlike `fetch()`, exhausting retries degrades to `[]`
+        rather than a `SourceFailure`: absence of reviews is an honest
+        degraded value here, not a page-level failure (AD-4, AD-9).
+        """
+        try:
+            canonicalize(url)
+        except InvalidProductURLError as exc:
+            logger.warning("scraper_tier2 fetch_reviews invalid_url for %s: %s", url, exc)
+            return []
+
+        last_error: Exception | None = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            try:
+                html = await asyncio.wait_for(
+                    self._render(url, wait_for_reviews=True), timeout=_FETCH_TIMEOUT_SECONDS
+                )
+                return parse_reviews(html)
+            except Exception as exc:  # noqa: BLE001 -- AD-4: never raises out
+                last_error = exc
+                logger.warning(
+                    "scraper_tier2 fetch_reviews attempt %s/%s failed for %s: %s",
+                    attempt,
+                    _MAX_ATTEMPTS,
+                    url,
+                    exc,
+                )
+                if attempt < _MAX_ATTEMPTS:
+                    await asyncio.sleep(_RETRY_DELAY_SECONDS)
+
+        logger.error(
+            "scraper_tier2 fetch_reviews giving up after %s attempts for %s: %s",
+            _MAX_ATTEMPTS,
+            url,
+            last_error,
+        )
+        return []
+
+    async def _render(self, url: str, wait_for_reviews: bool = False) -> str:
         proxy = build_proxy_config(self._settings.scraper_proxy_url)
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(proxy=proxy)
@@ -199,6 +344,17 @@ class ScraperTier2Source:
                 # reading the DOM, rather than racing it right after the
                 # bare "domcontentloaded" navigation event.
                 await page.wait_for_selector("#productTitle", timeout=5000)
+                if wait_for_reviews:
+                    # The review widget can hydrate later than the rest of
+                    # the page. Give it a short, best-effort grace period --
+                    # but a product can legitimately have zero reviews, so
+                    # a timeout here must never fail the fetch.
+                    try:
+                        await page.wait_for_selector(
+                            '[data-hook="review"]', timeout=2000
+                        )
+                    except Exception as exc:  # noqa: BLE001 -- best-effort only
+                        logger.debug("no review section hydrated for %s: %s", url, exc)
                 return await page.content()
             finally:
                 await browser.close()

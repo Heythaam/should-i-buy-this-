@@ -7,12 +7,14 @@ network access.
 """
 
 import asyncio
+from datetime import date
 from pathlib import Path
 
 import pydantic
 import pytest
 
 from app.models.product import ProductFacts, SourceFailure, SourceTier
+from app.models.review import Review
 from app.pipeline.canonicalize import canonicalize
 from app.pipeline.sources import scraper_tier2 as scraper_tier2_module
 from app.pipeline.sources.scraper_tier2 import (
@@ -21,6 +23,7 @@ from app.pipeline.sources.scraper_tier2 import (
     _parse_price_text,
     build_proxy_config,
     parse_product_facts,
+    parse_reviews,
 )
 from app.settings import Settings
 
@@ -292,3 +295,148 @@ def test_settings_rejects_malformed_proxy_url_at_construction_time():
 
     with pytest.raises(pydantic.ValidationError):
         Settings(scraper_proxy_url="not a url")
+
+
+# -- parse_reviews() -----------------------------------------------------
+
+
+def test_parse_reviews_fixture_yields_four_reviews_with_expected_fields():
+    html = _read_fixture("amazon_product_reviews.html")
+
+    reviews = parse_reviews(html)
+
+    assert len(reviews) == 4
+    assert all(isinstance(r, Review) for r in reviews)
+
+    first = reviews[0]
+    assert first.rating == 5
+    assert first.title == "Great little speaker"
+    assert "sound is surprisingly good" in first.body
+    assert first.helpful_votes == 42
+    assert first.review_date == date(2023, 1, 5)
+
+
+def test_parse_reviews_includes_a_critical_review():
+    html = _read_fixture("amazon_product_reviews.html")
+
+    reviews = parse_reviews(html)
+
+    critical = [r for r in reviews if r.rating <= 2]
+    assert len(critical) == 1
+    assert critical[0].title == "Stopped working after a week"
+
+
+def test_parse_reviews_missing_helpful_vote_statement_defaults_to_zero():
+    html = _read_fixture("amazon_product_reviews.html")
+
+    reviews = parse_reviews(html)
+
+    good_value_review = next(r for r in reviews if r.title == "Good value")
+    assert good_value_review.helpful_votes == 0
+
+
+def test_parse_reviews_unparseable_date_text_yields_none():
+    html = _read_fixture("amazon_product_reviews.html")
+
+    reviews = parse_reviews(html)
+
+    undated_review = next(r for r in reviews if r.title == "It's okay")
+    assert undated_review.review_date is None
+
+
+def test_parse_reviews_skips_block_missing_rating_or_body():
+    html = """
+    <html><body>
+      <div data-hook="review">
+        <a data-hook="review-title"><span>No rating here</span></a>
+        <span data-hook="review-body"><span>Body present but no star rating.</span></span>
+      </div>
+      <div data-hook="review">
+        <i data-hook="review-star-rating"><span class="a-icon-alt">5.0 out of 5 stars</span></i>
+        <a data-hook="review-title"><span>No body here</span></a>
+      </div>
+    </body></html>
+    """
+
+    assert parse_reviews(html) == []
+
+
+def test_parse_reviews_returns_empty_list_when_no_review_blocks_present():
+    assert parse_reviews("<html><body>Robot Check</body></html>") == []
+
+
+# -- ScraperTier2Source.fetch_reviews() -----------------------------------
+
+
+def test_fetch_reviews_returns_parsed_reviews_via_stubbed_render():
+    source = ScraperTier2Source(settings=Settings(scraper_proxy_url=None))
+    html = _read_fixture("amazon_product_reviews.html")
+
+    async def fake_render(url: str, wait_for_reviews: bool = False) -> str:
+        return html
+
+    source._render = fake_render  # type: ignore[method-assign]
+
+    result = asyncio.run(source.fetch_reviews("https://www.amazon.com/dp/B08N5WRWNW"))
+
+    assert isinstance(result, list)
+    assert len(result) == 4
+    assert all(isinstance(r, Review) for r in result)
+
+
+def test_fetch_reviews_returns_empty_list_and_never_raises_when_render_fails(monkeypatch):
+    monkeypatch.setattr(scraper_tier2_module.asyncio, "sleep", _no_delay_sleep)
+
+    source = ScraperTier2Source(settings=Settings(scraper_proxy_url=None))
+
+    call_count = 0
+
+    async def failing_render(url: str, wait_for_reviews: bool = False) -> str:
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("blocked by CAPTCHA")
+
+    source._render = failing_render  # type: ignore[method-assign]
+
+    result = asyncio.run(source.fetch_reviews("https://www.amazon.com/dp/B08N5WRWNW"))
+
+    assert result == []
+    # one initial attempt + one retry (AD-9), never an unhandled exception
+    assert call_count == 2
+
+
+def test_fetch_reviews_degrades_to_empty_list_when_render_times_out(monkeypatch):
+    monkeypatch.setattr(scraper_tier2_module, "_FETCH_TIMEOUT_SECONDS", 0.05)
+
+    source = ScraperTier2Source(settings=Settings(scraper_proxy_url=None))
+
+    async def hanging_render(url: str, wait_for_reviews: bool = False) -> str:
+        await asyncio.sleep(10)
+        return "<html></html>"
+
+    source._render = hanging_render  # type: ignore[method-assign]
+
+    result = asyncio.run(source.fetch_reviews("https://www.amazon.com/dp/B08N5WRWNW"))
+
+    assert result == []
+
+
+def test_fetch_reviews_returns_empty_list_for_non_amazon_url():
+    source = ScraperTier2Source(settings=Settings(scraper_proxy_url=None))
+
+    result = asyncio.run(source.fetch_reviews("https://www.ebay.com/itm/123"))
+
+    assert result == []
+
+
+def test_fetch_reviews_returns_empty_list_when_page_has_no_reviews():
+    source = ScraperTier2Source(settings=Settings(scraper_proxy_url=None))
+
+    async def no_reviews_render(url: str, wait_for_reviews: bool = False) -> str:
+        return "<html><body><span id='productTitle'>X</span></body></html>"
+
+    source._render = no_reviews_render  # type: ignore[method-assign]
+
+    result = asyncio.run(source.fetch_reviews("https://www.amazon.com/dp/B08N5WRWNW"))
+
+    assert result == []
