@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Should I Buy This? — Brainstorm Receipt — 2026-10-25</title>
+<style>
+/* ============================================================
+   TOKENS
+   ============================================================ */
+:root{
+  --paper:#f7f2e4;
+  --paper-2:#efe7d2;
+  --card:#fffdf6;
+  --ink:#231f16;
+  --ink-soft:#5c5444;
+  --ink-faint:#8a8068;
+  --rule:#cdbf9b;
+  --accent:#c1440e;
+  --accent-soft:#e7c9ad;
+  --evidence:#1f6f54;
+  --buy:#1f7a3d;
+  --skip:#b3261e;
+  --wait:#b8862b;
+  --dreamer:#7a4fae;
+  --dreamer-bg:#f1e9fb;
+  --realist:#1a5c7a;
+  --realist-bg:#e7f1f6;
+  --critic:#9c2b22;
+  --critic-bg:#fbe9e6;
+  --shadow: 0 10px 30px -12px rgba(35,31,22,.35);
+  --mono: 'Courier New', Courier, monospace;
+  --serif: Georgia, 'Times New Roman', serif;
+  --sans: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  margin:0;
+  background:
+    radial-gradient(circle at 1px 1px, rgba(35,31,22,.05) 1px, transparent 1.6px) 0 0/16px 16px,
+    var(--paper);
+  color:var(--ink);
+  font-family:var(--sans);
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{font-family:var(--serif); margin:0; }
+p{margin:0;}
+a{color:inherit;}
+.wrap{max-width:1180px; margin:0 auto; padding:0 24px;}
+
+/* ============================================================
+   SCROLL REVEAL
+   ============================================================ */
+.reveal{opacity:0; transform:translateY(22px); transition:opacity .7s ease, transform .7s ease;}
+.reveal.in-view{opacity:1; transform:none;}
+
+/* ============================================================
+   STICKY NAV — receipt tabs
+   ============================================================ */
+.tabs-nav{
+  position:sticky; top:0; z-index:50;
+  background:rgba(247,242,228,.92);
+  backdrop-filter:blur(6px);
+  border-bottom:1px dashed var(--rule);
+}
+.tabs-nav .wrap{display:flex; align-items:center; gap:4px; overflow-x:auto; padding:10px 24px;}
+.tabs-nav .brand{
+  font-family:var(--mono); font-weight:700; font-size:.78rem; letter-spacing:.08em;
+  color:var(--ink-soft); white-space:nowrap; margin-right:10px;
+}
+.tab-btn{
+  font-family:var(--mono); font-size:.72rem; letter-spacing:.06em; text-transform:uppercase;
+  background:var(--card); border:1px solid var(--rule); border-radius:3px 3px 0 0;
+  padding:7px 12px 6px; cursor:pointer; color:var(--ink-soft); text-decoration:none;
+  white-space:nowrap; transition:background .2s, color .2s, transform .2s;
+  position:relative; top:1px;
+}
+.tab-btn:hover{background:var(--accent); color:#fff; border-color:var(--accent); transform:translateY(-2px);}
+.tab-btn.active{background:var(--ink); color:var(--paper); border-color:var(--ink);}
+
+/* ============================================================
+   BARCODE DECORATION
+   ============================================================ */
+.barcode{
+  height:28px;
+  background-image:repeating-linear-gradient(90deg,
+    var(--ink) 0 2px, transparent 2px 5px,
+    var(--ink) 5px 6px, transparent 6px 11px,
+    var(--ink) 11px 14px, transparent 14px 17px);
+  opacity:.85;
+}
+
+/* ============================================================
+   HERO / RECEIPT HEADER
+   ============================================================ */
+.hero{padding:48px 0 64px; position:relative;}
+.receipt{
+  background:var(--card);
+  max-width:760px; margin:28px auto 0;
+  padding:34px 38px 46px;
+  box-shadow:var(--shadow);
+  position:relative;
+  border:1px solid var(--rule);
+}
+.receipt::after{
+  content:""; position:absolute; left:0; right:0; bottom:-14px; height:16px;
+  background:
+    linear-gradient(-45deg, var(--paper) 8px, transparent 0) 0 0/16px 16px,
+    linear-gradient(45deg, var(--paper) 8px, transparent 0) 0 0/16px 16px;
+  background-color:var(--card);
+}
+.receipt-store{
+  text-align:center; font-family:var(--mono); font-weight:700;
+  letter-spacing:.12em; font-size:1.9rem; text-transform:uppercase;
+  margin-bottom:2px;
+}
+.receipt-sub{
+  text-align:center; font-family:var(--mono); font-size:.72rem; color:var(--ink-faint);
+  letter-spacing:.14em; text-transform:uppercase; margin-bottom:18px;
+}
+.receipt-rule{border:none; border-top:1px dashed var(--rule); margin:16px 0;}
+.receipt-line{
+  display:flex; gap:14px; font-family:var(--mono); font-size:.82rem;
+  padding:5px 0; align-items:baseline;
+}
+.receipt-line .label{
+  flex:0 0 auto; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.06em; font-size:.7rem;
+}
+.receipt-line .dots{flex:1 1 auto; border-bottom:1px dotted var(--rule); transform:translateY(-4px);}
+.receipt-line .val{flex:0 0 auto; text-align:right; max-width:60%; color:var(--ink);}
+.status-chip{
+  display:inline-block; font-family:var(--mono); font-size:.68rem; letter-spacing:.08em;
+  text-transform:uppercase; padding:2px 8px; border-radius:2px; background:var(--evidence); color:#fff;
+}
+.receipt-foot{
+  text-align:center; font-family:var(--mono); font-size:.68rem; color:var(--ink-faint);
+  letter-spacing:.1em; margin-top:18px;
+}
+
+/* ============================================================
+   SECTION SCAFFOLD
+   ============================================================ */
+section.technique{padding:70px 0;}
+.section-head{max-width:760px; margin:0 auto 42px; text-align:center;}
+.section-kicker{
+  font-family:var(--mono); font-size:.72rem; letter-spacing:.2em; text-transform:uppercase;
+  color:var(--accent); font-weight:700; margin-bottom:8px;
+}
+.section-title{font-size:2.1rem; margin-bottom:10px;}
+.section-tagline{color:var(--ink-soft); font-size:1rem; font-style:italic;}
+
+/* ============================================================
+   01 — FIRST PRINCIPLES — STRATA + REBUILD
+   ============================================================ */
+.strata-wrap{max-width:880px; margin:0 auto 56px;}
+.strata-label{
+  text-align:center; font-family:var(--mono); font-size:.72rem; letter-spacing:.18em;
+  color:var(--ink-faint); text-transform:uppercase; margin-bottom:14px;
+}
+.strata{display:flex; flex-direction:column; gap:3px;}
+.layer{
+  position:relative;
+  padding:13px 22px;
+  border-radius:3px;
+  font-size:.88rem;
+  color:#fff;
+  box-shadow:inset 0 -2px 0 rgba(0,0,0,.15);
+  transition:transform .3s ease, box-shadow .3s ease;
+}
+.layer:hover{transform:translateX(6px); box-shadow:inset 0 -2px 0 rgba(0,0,0,.15), var(--shadow);}
+.layer .lnum{
+  font-family:var(--mono); font-size:.68rem; opacity:.75; margin-right:10px;
+}
+.layer.bedrock{
+  margin-top:10px;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(255,255,255,.08) 0 3px, transparent 4px),
+    radial-gradient(circle at 70% 60%, rgba(255,255,255,.08) 0 2px, transparent 3px),
+    radial-gradient(circle at 45% 80%, rgba(255,255,255,.08) 0 2px, transparent 3px),
+    linear-gradient(135deg,#2b241a,#15120c);
+  border:2px solid #000;
+  font-weight:700;
+  padding:20px 22px;
+  text-align:center;
+  font-size:.95rem;
+}
+.bedrock-tag{
+  display:block; font-family:var(--mono); font-size:.65rem; letter-spacing:.18em;
+  text-transform:uppercase; color:#d8c89a; margin-bottom:6px;
+}
+
+.rebuild-wrap{max-width:1080px; margin:0 auto;}
+.rebuild-label{
+  text-align:center; font-family:var(--mono); font-size:.72rem; letter-spacing:.18em;
+  color:var(--ink-faint); text-transform:uppercase; margin:36px 0 20px;
+}
+.tag-grid{
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:22px 18px;
+}
+.price-tag-card{
+  background:var(--card);
+  border:1px solid var(--rule);
+  clip-path:polygon(14% 0, 100% 0, 100% 100%, 14% 100%, 0 50%);
+  padding:16px 18px 16px 30px;
+  min-height:150px;
+  display:flex; flex-direction:column; gap:8px;
+  box-shadow:var(--shadow);
+  transition:transform .25s ease, box-shadow .25s ease;
+}
+.price-tag-card:hover{transform:translateY(-5px) rotate(-.6deg);}
+.price-tag-card .hole{
+  position:absolute; width:10px; height:10px; border-radius:50%;
+  border:2px solid var(--ink); background:var(--paper); left:6px; top:50%;
+  transform:translateY(-50%);
+}
+.price-tag-card .tag-no{
+  font-family:var(--mono); font-size:.68rem; color:var(--accent); font-weight:700; letter-spacing:.05em;
+}
+.price-tag-card p{font-size:.86rem; color:var(--ink);}
+
+/* ============================================================
+   02 — REVERSE BRAINSTORMING — FLIP CARDS
+   ============================================================ */
+.flip-grid{
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:22px;
+  max-width:1180px; margin:0 auto;
+}
+.flip-card{height:250px; perspective:1400px; cursor:pointer;}
+.flip-card-inner{
+  position:relative; width:100%; height:100%;
+  transition:transform .7s cubic-bezier(.4,.2,.2,1);
+  transform-style:preserve-3d;
+}
+.flip-card:hover .flip-card-inner,
+.flip-card.flipped .flip-card-inner,
+.flip-card:focus-visible .flip-card-inner{transform:rotateY(180deg);}
+.flip-face{
+  position:absolute; inset:0; backface-visibility:hidden;
+  border-radius:8px; padding:18px; display:flex; flex-direction:column;
+  box-shadow:var(--shadow);
+}
+.flip-front{
+  background:
+    repeating-linear-gradient(135deg, rgba(255,255,255,.05) 0 10px, transparent 10px 20px),
+    linear-gradient(160deg,#8f271f,var(--critic));
+  color:#fff; justify-content:space-between;
+}
+.flip-back{
+  background:linear-gradient(160deg,#2f8a63,var(--evidence));
+  color:#fff; transform:rotateY(180deg); justify-content:space-between;
+}
+.flip-kicker{
+  font-family:var(--mono); font-size:.65rem; letter-spacing:.14em; text-transform:uppercase;
+  opacity:.85; display:flex; align-items:center; gap:6px;
+}
+.flip-icon{font-size:1rem;}
+.flip-text{font-size:.92rem; line-height:1.4; margin-top:10px;}
+.flip-hint{
+  font-family:var(--mono); font-size:.6rem; letter-spacing:.1em; text-transform:uppercase; opacity:.7;
+  text-align:right;
+}
+
+/* ============================================================
+   03 — DISNEY METHOD — THREE ROOMS
+   ============================================================ */
+.rooms{
+  display:grid; grid-template-columns:repeat(3,1fr); gap:0;
+  max-width:1180px; margin:0 auto; border:1px solid var(--rule); border-radius:8px; overflow:hidden;
+  box-shadow:var(--shadow);
+}
+.room{padding:26px 22px 30px; min-height:100%;}
+.room + .room{border-left:1px dashed rgba(0,0,0,.15);}
+.room-dreamer{background:var(--dreamer-bg);}
+.room-realist{
+  background:var(--realist-bg);
+  background-image:
+    linear-gradient(rgba(26,92,122,.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(26,92,122,.09) 1px, transparent 1px);
+  background-size:18px 18px;
+}
+.room-critic{
+  background:var(--critic-bg);
+  background-image:repeating-linear-gradient(45deg, rgba(156,43,34,.05) 0 2px, transparent 2px 10px);
+}
+.room-head{display:flex; align-items:center; gap:10px; margin-bottom:6px;}
+.room-icon{font-size:1.6rem;}
+.room-title{font-size:1.25rem;}
+.room-dreamer .room-title{color:var(--dreamer);}
+.room-realist .room-title{color:var(--realist);}
+.room-critic .room-title{color:var(--critic);}
+.room-sub{font-family:var(--mono); font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:18px;}
+.room-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:12px;}
+.room-item{
+  background:rgba(255,255,255,.65); border-radius:6px; padding:10px 12px; font-size:.84rem;
+  position:relative; padding-left:34px; transition:transform .2s ease;
+}
+.room-item:hover{transform:translateX(4px);}
+.room-item .chip{
+  position:absolute; left:8px; top:10px; font-size:.9rem;
+}
+.room-dreamer .room-item{border-left:3px solid var(--dreamer);}
+.room-realist .room-item{border-left:3px solid var(--realist); font-family:var(--mono); font-size:.78rem;}
+.room-critic .room-item{border-left:3px solid var(--critic);}
+
+/* ============================================================
+   04 — SYNTHESIS — THE VERDICT (climax)
+   ============================================================ */
+.verdict-section{
+  padding:80px 0 100px;
+  background:linear-gradient(180deg, var(--paper) 0%, #2a2318 100%);
+  position:relative;
+}
+.verdict-section .section-kicker, .verdict-section .section-title{color:var(--paper);}
+.verdict-section .section-tagline{color:#d8cba4;}
+.verdict-card{
+  max-width:820px; margin:0 auto; background:var(--card); border-radius:10px;
+  box-shadow:0 30px 60px -20px rgba(0,0,0,.6);
+  padding:40px 44px 50px; position:relative; overflow:hidden;
+}
+.verdict-top{display:flex; justify-content:space-between; align-items:flex-start; gap:20px; flex-wrap:wrap;}
+.verdict-badge{
+  display:inline-flex; align-items:center; gap:10px;
+  border:4px solid var(--buy); color:var(--buy);
+  font-family:var(--mono); font-weight:700; font-size:1.5rem; letter-spacing:.06em;
+  padding:10px 20px; border-radius:6px; transform:rotate(-4deg);
+  text-transform:uppercase;
+}
+.verdict-badge .dot{width:12px; height:12px; border-radius:50%; background:var(--buy);}
+.gauge-wrap{display:flex; align-items:center; gap:14px;}
+.gauge{width:108px; height:108px; transform:rotate(-90deg);}
+.gauge-track{fill:none; stroke:var(--rule); stroke-width:10;}
+.gauge-fill{
+  fill:none; stroke:var(--evidence); stroke-width:10; stroke-linecap:round;
+  stroke-dasharray:326.7; stroke-dashoffset:326.7;
+  transition:stroke-dashoffset 1.6s cubic-bezier(.2,.7,.2,1);
+}
+.gauge-label{font-family:var(--mono);}
+.gauge-pct{font-size:1.7rem; font-weight:700; color:var(--evidence);}
+.gauge-caption{font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); max-width:150px;}
+
+.verdict-section-title{margin:34px 0 14px; font-size:1.1rem; color:var(--ink); display:flex; align-items:center; gap:8px;}
+.evidence-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:12px;}
+.evidence-tag{
+  display:flex; gap:12px; background:var(--paper-2); border-radius:6px; padding:12px 14px;
+  border-left:3px solid var(--evidence); font-size:.86rem; align-items:flex-start;
+}
+.evidence-tag .ref{
+  font-family:var(--mono); font-weight:700; color:var(--evidence); flex:0 0 auto; font-size:.78rem;
+  background:var(--card); border:1px solid var(--evidence); border-radius:4px; padding:1px 6px; height:fit-content;
+}
+.receipt-divider{border:none; border-top:2px dashed var(--rule); margin:30px 0 22px;}
+.directions-row{display:flex; flex-wrap:wrap; gap:10px; justify-content:center;}
+.stamp-chip{
+  font-family:var(--mono); font-size:.72rem; letter-spacing:.04em; text-transform:uppercase;
+  border:2px solid var(--accent); color:var(--accent); border-radius:30px; padding:7px 14px;
+  transform:rotate(var(--r,0deg));
+  transition:transform .2s ease, background .2s ease, color .2s ease;
+}
+.stamp-chip:hover{background:var(--accent); color:#fff; transform:rotate(0deg) scale(1.05);}
+.verdict-stamp-corner{
+  position:absolute; top:18px; right:-40px; width:170px; text-align:center;
+  transform:rotate(18deg); border:3px solid var(--accent); color:var(--accent);
+  font-family:var(--mono); font-weight:700; font-size:.7rem; letter-spacing:.1em;
+  padding:4px 0; opacity:.85; text-transform:uppercase;
+}
+.footer-note{
+  text-align:center; color:#cfc2a0; font-family:var(--mono); font-size:.68rem;
+  letter-spacing:.1em; margin-top:40px; text-transform:uppercase;
+}
+
+@media (max-width:860px){
+  .rooms{grid-template-columns:1fr;}
+  .room + .room{border-left:none; border-top:1px dashed rgba(0,0,0,.15);}
+  .verdict-top{flex-direction:column;}
+  .verdict-stamp-corner{display:none;}
+}
+@media (max-width:520px){
+  .receipt{padding:26px 18px 36px;}
+  .receipt-store{font-size:1.4rem;}
+  .verdict-card{padding:28px 20px 36px;}
+}
+</style>
+</head>
+<body>
+
+<nav class="tabs-nav">
+  <div class="wrap">
+    <span class="brand">SKU 2026-10-25</span>
+    <a class="tab-btn" data-target="hero" href="#hero">Receipt</a>
+    <a class="tab-btn" data-target="first-principles" href="#first-principles">01 Bedrock</a>
+    <a class="tab-btn" data-target="reverse" href="#reverse">02 Inversions</a>
+    <a class="tab-btn" data-target="disney" href="#disney">03 Three Rooms</a>
+    <a class="tab-btn" data-target="synthesis" href="#synthesis">04 Verdict</a>
+  </div>
+</nav>
+
+<header class="hero" id="hero">
+  <div class="barcode wrap" style="max-width:760px;"></div>
+  <div class="receipt reveal">
+    <div class="receipt-store">Should I Buy This?</div>
+    <div class="receipt-sub">Brainstorm Receipt · Ideate-for-me session</div>
+    <hr class="receipt-rule">
+    <div class="receipt-line"><span class="label">Topic</span><span class="dots"></span><span class="val">Should I Buy This? product research tool — architecture, data flow, pitfalls, project structure</span></div>
+    <div class="receipt-line"><span class="label">Goal</span><span class="dots"></span><span class="val">Think through the design before implementing; focus on scraper blocking, review summarization at scale, Reddit relevance, and clean LLM JSON output</span></div>
+    <div class="receipt-line"><span class="label">Mode</span><span class="dots"></span><span class="val">Autonomous</span></div>
+    <div class="receipt-line"><span class="label">Techniques</span><span class="dots"></span><span class="val">First Principles → Reverse Brainstorming → Disney Method → Synthesis</span></div>
+    <div class="receipt-line"><span class="label">Timestamp</span><span class="dots"></span><span class="val">2026-10-25T23:55</span></div>
+    <hr class="receipt-rule">
+    <div style="text-align:center;"><span class="status-chip">Status: Complete</span></div>
+    <div class="receipt-foot">*** thank you for ideating — keep this receipt for your records ***</div>
+  </div>
+</header>
+
+<!-- ============================================================
+     01 — FIRST PRINCIPLES THINKING
+     ============================================================ -->
+<section class="technique" id="first-principles">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">Technique 01 · First Principles Thinking</div>
+      <h2 class="section-title">Dig to the Bedrock, Then Rebuild</h2>
+      <p class="section-tagline">Strip the idea down to truths that can't be argued with — then construct upward from them.</p>
+    </div>
+
+    <div class="strata-wrap">
+      <div class="strata-label reveal">▾ Ten truths, layer by layer, down to bedrock ▾</div>
+      <div class="strata">
+        <div class="layer reveal" style="background:#c98a4b;"><span class="lnum">01</span>A verdict is a probabilistic judgment from evidence; it does not need fresh computation every time for the same product.</div>
+        <div class="layer reveal" style="background:#bd7f44;"><span class="lnum">02</span>Scraping method is incidental; the real goal is a stable fact set of price, specs, and reviews.</div>
+        <div class="layer reveal" style="background:#b1753d;"><span class="lnum">03</span>Reddit relevance is a retrieval and ranking problem, not a search-harder problem.</div>
+        <div class="layer reveal" style="background:#a56b37;"><span class="lnum">04</span>Information in thousands of reviews lives in the distribution and outliers, not every individual review.</div>
+        <div class="layer reveal" style="background:#996131;"><span class="lnum">05</span>The LLM is a reasoning and formatting layer, not a research layer; never ask it to know things, only to reason over supplied evidence.</div>
+        <div class="layer reveal" style="background:#8d582b;"><span class="lnum">06</span>A product URL is just one identifier among many for the same real-world product.</div>
+        <div class="layer reveal" style="background:#804e26;"><span class="lnum">07</span>JSON cleanliness is a contract and validation problem, not a prompting problem.</div>
+        <div class="layer reveal" style="background:#744521;"><span class="lnum">08</span>Confidence is a measure of evidence quality and quantity, not sentiment intensity.</div>
+        <div class="layer reveal" style="background:#683c1c;"><span class="lnum">09</span>Wait verdicts are only meaningful with a time dimension, such as price history.</div>
+        <div class="layer bedrock reveal">
+          <span class="bedrock-tag">◆ Bedrock ◆</span>
+          The atomic units of this system are <strong>Identity, Price, Opinions, Alternatives, and Reasoning</strong> — everything else is plumbing.
+        </div>
+      </div>
+    </div>
+
+    <div class="rebuild-wrap">
+      <div class="rebuild-label reveal">▴ Rebuilt upward: 15 ideas constructed from bedrock ▴</div>
+      <div class="tag-grid">
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #20</span><p>Decouple evidence gathering from verdict synthesis via a fixed JSON evidence schema; the LLM only ever sees that schema, never raw HTML or text.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #21</span><p>Canonicalize every product by brand, model, and category before scraping alternatives or searching Reddit, so everything keys off one stable identity.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #22</span><p>Cache the full evidence bundle per canonical product for N days, since most incoming URLs duplicate already-researched products.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #23</span><p>Define a ProductPage interface with title, price, specs, rating, and review sample, and build thin per-site adapters behind it.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #24</span><p>Start a price-as-time-series table on day one, even with a single data point, so a wait verdict becomes a real statistical claim over time.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #25</span><p>Compute confidence as an explicit formula of review count, review recency, Reddit corroboration count, and spec completeness — not an LLM feeling.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #26</span><p>Enforce the LLM output via structured outputs or function-calling schema validation, never a "please respond in JSON" instruction.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #27</span><p>Build Reddit queries from canonical entity plus synonyms plus purchase-intent phrases like "anyone regret" or "worth it," not the raw product title.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #28</span><p>Solve review volume via stratified sampling of random, most-helpful, and one-and-five-star outliers, instead of summarizing everything.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #29</span><p>Treat official data providers like Rainforest API or Keepa as the true first-principles source of product data, with scraping only as a fallback.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #30</span><p>The real user need is a verdict, which a pre-built, periodically refreshed product knowledge base can serve instantly for popular products, instead of synchronous scraping.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #31</span><p>Design top-down from the UI contract: define the exact verdict JSON the frontend renders first, then derive what the LLM must output, then what evidence must be gathered.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #32</span><p>Separate fact fields like price and specs that must be exact from opinion fields like pros, cons, and verdict that are probabilistic, in the schema.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #33</span><p>Alternatives-finding is also a retrieval and ranking problem keyed on canonical entity, category, and price band — reusing the same infra as Reddit search.</p></div>
+        <div class="price-tag-card reveal"><div class="hole"></div><span class="tag-no">IDEA #34</span><p>Store each verdict with a timestamp and product identity so repeat visits can show "the verdict changed since you last checked."</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     02 — REVERSE BRAINSTORMING
+     ============================================================ -->
+<section class="technique" id="reverse" style="background:var(--paper-2);">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">Technique 02 · Reverse Brainstorming</div>
+      <h2 class="section-title">Engineer the Failure. Then Flip It.</h2>
+      <p class="section-tagline">Each card asks "how could this break?" — hover or tap to flip it into its fix.</p>
+    </div>
+
+    <div class="flip-grid">
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could Amazon detect the scraper's consistent IP and user-agent pattern and permaban the IP within a day?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Rotate residential proxies, randomize headers and viewport, use stealth plugins, and throttle to human-like request rates per IP.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could Reddit search return unrelated threads that mention the brand but not the product?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Require entity-level match on model number or exact phrase, plus an embedding-similarity re-rank step before threads reach the LLM.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could summarizing five thousand reviews cost twenty dollars in tokens and ninety seconds per request?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Pre-aggregate review stats like rating histogram and keyword frequency with non-LLM methods, and only send the LLM a tight digest of themes and exemplar quotes.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could the LLM JSON output break the UI by adding an extra field or wrapping in markdown fences?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Validate against a strict schema server-side and auto-repair or reject the output before the UI ever sees it.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could a niche or new product have zero Reddit discussion, making the verdict look unsupported?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Model evidence sparsity as a first-class state, lowering confidence and saying so explicitly rather than forcing a confident verdict from thin air.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could the suggested alternatives be irrelevant — wrong category or wildly different price?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Constrain alternative search to the same category taxonomy and a price band within twenty percent, verified against structured spec data.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could a captcha appear mid-scrape and hang the whole pipeline?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Detect captcha or block signatures immediately and fail fast, falling back to cached or API data or a partial-evidence verdict.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could a pasted URL point to a bundle or variant, causing specs to be scraped for the wrong color or size?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Parse the variant selection state and selected SKU explicitly, not just the generic top-level page.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could scraping Amazon at scale create legal and account risk under its terms of use?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Architect around official APIs and the user's own cached page view — such as a browser extension capturing the page they're already on — instead of server-side scraping.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could the system be asked for a verdict when the pasted URL is broken or garbage?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Detect extraction failure early and return a clear "insufficient data" state instead of forcing the LLM to fabricate a verdict.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could the full request take forty-five seconds or more and cause the user to abandon the page?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Stream partial results — price and specs first, then reviews, then verdict last — via server-sent events instead of one blocking call.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could the Reddit API rate-limit or PRAW auth break silently in production?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Wrap every external dependency — PRAW, the scraper, and the LLM — in a circuit breaker with explicit health state surfaced to the pipeline.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could many concurrent users requesting the same hot product cause a duplicate scrape storm?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Use request coalescing or lock-based dedup keyed on canonical product id, turning N concurrent requests into one scrape plus N cache reads.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could the confidence score always come out suspiciously high, regardless of evidence quality, because the LLM is a people-pleaser?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Compute confidence algorithmically outside the LLM from measurable inputs, and only let the LLM explain it — never set it.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could most reviews be fake or incentivized, making the summary reflect manipulated sentiment?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Cross-check review sentiment against independent Reddit sentiment and flag large divergence as a "reviews may be inflated" signal.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could the scraper work today and silently break next month when the site changes its page structure?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Run contract tests against saved HTML fixtures and alert on extraction field null-rate, instead of assuming it will keep working.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could non-Amazon sites with wildly different page structures break the "universal site" promise?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Use tiered site support: native adapters for top retailers, and a generic heuristic or LLM-assisted extractor as a clearly lower-confidence fallback for the long tail.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flip-card reveal" tabindex="0">
+        <div class="flip-card-inner">
+          <div class="flip-face flip-front">
+            <div class="flip-kicker"><span class="flip-icon">⚠</span>Failure Mode</div>
+            <div class="flip-text">How could the LLM hallucinate a price or spec that was never scraped?</div>
+            <div class="flip-hint">tap to flip ▸</div>
+          </div>
+          <div class="flip-face flip-back">
+            <div class="flip-kicker"><span class="flip-icon">✓</span>Inversion</div>
+            <div class="flip-text">Require every fact field in the output to trace to a literal source quote, and reject outputs that introduce ungrounded facts via a post-validation pass.</div>
+            <div class="flip-hint">◂ flip back</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     03 — DISNEY METHOD
+     ============================================================ -->
+<section class="technique" id="disney">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">Technique 03 · Disney Method</div>
+      <h2 class="section-title">Three Rooms, One Product</h2>
+      <p class="section-tagline">Dream without limits, build without excuses, then interrogate without mercy.</p>
+    </div>
+
+    <div class="rooms reveal">
+      <div class="room room-dreamer">
+        <div class="room-head"><span class="room-icon">☁</span><h3 class="room-title">Dreamer</h3></div>
+        <div class="room-sub">No limits. No budget. No "but how."</div>
+        <ul class="room-list">
+          <li class="room-item"><span class="chip">✦</span>The tool watches a cart or wishlist across sites and proactively tells you when to buy, not just on demand.</li>
+          <li class="room-item"><span class="chip">✦</span>A browser extension overlay shows the verdict right on the product page itself, with no copy-paste of a URL needed.</li>
+          <li class="room-item"><span class="chip">✦</span>The verdict includes a short AI-generated voice summary you can listen to while shopping.</li>
+          <li class="room-item"><span class="chip">✦</span>Community-sourced trust scoring, where users vote whether past verdicts were right, building an accuracy track record over time.</li>
+          <li class="room-item"><span class="chip">✦</span>The tool tracks price drops and actively notifies "now is the time to buy," turning a wait label into a live alert instead of a static guess.</li>
+          <li class="room-item"><span class="chip">✦</span>A second-opinion mode runs multiple LLM personas — frugal engineer, luxury reviewer, sustainability advocate — each giving an independent verdict shown side by side.</li>
+          <li class="room-item"><span class="chip">✦</span>A visual evidence-trail UI lets you click any claim in the verdict and see the exact review or Reddit quote it came from, like inline citations.</li>
+          <li class="room-item"><span class="chip">✦</span>The tool builds a personal taste profile over time from what you bought versus skipped, and tunes future verdicts to that profile.</li>
+        </ul>
+      </div>
+
+      <div class="room room-realist">
+        <div class="room-head"><span class="room-icon">▣</span><h3 class="room-title">Realist</h3></div>
+        <div class="room-sub">Make it buildable. Make it ship.</div>
+        <ul class="room-list">
+          <li class="room-item"><span class="chip">⚙</span>Use a plugin architecture for scrapers — BeautifulSoup for static HTML sites, Playwright only for JS-heavy sites — selected by a per-domain config flag.</li>
+          <li class="room-item"><span class="chip">⚙</span>Use a job queue such as Celery, RQ, or Arq for the scrape, reddit, and LLM pipeline, so the API returns a job id instantly and the UI polls or subscribes for completion.</li>
+          <li class="room-item"><span class="chip">⚙</span>Store canonical product, evidence, and verdict in Postgres with a simple schema of products, evidence snapshots, and verdicts, versioned by scrape timestamp.</li>
+          <li class="room-item"><span class="chip">⚙</span>Use OpenAI structured outputs or a schema validation library with a retry-on-validation-failure loop to guarantee the final JSON shape.</li>
+          <li class="room-item"><span class="chip">⚙</span>Search Reddit via PRAW scoped to relevant subreddits plus a search fallback, then re-rank candidates by embedding similarity to the product title before the LLM sees them.</li>
+          <li class="room-item"><span class="chip">⚙</span>Pull the rating distribution the site already shows, sample fifty to one hundred reviews stratified by rating and helpfulness, cluster by embedding into themes, and summarize clusters rather than raw reviews.</li>
+          <li class="room-item"><span class="chip">⚙</span>Add a scraping proxy layer with residential proxy pool, user-agent rotation, and randomized delays from day one, since naive scrapers reliably work great for one week and then stop.</li>
+          <li class="room-item"><span class="chip">⚙</span>Build the FastAPI service as clear pipeline stages in separate async functions — extract, then enrich, then synthesize, then validate — each independently testable and mockable.</li>
+          <li class="room-item"><span class="chip">⚙</span>Use Jinja2 and HTMX for a simple reactive UI without a heavy JS framework, polling a status endpoint to progressively render sections.</li>
+          <li class="room-item"><span class="chip">⚙</span>Define the LLM verdict schema explicitly with verdict, confidence, pros, cons, alternatives, reasoning summary, and evidence sources, and version the schema as UI and prompt evolve together.</li>
+          <li class="room-item"><span class="chip">⚙</span>Separate the cheap extraction LLM calls for review clustering from the stronger synthesis LLM call for the final verdict, to control cost.</li>
+          <li class="room-item"><span class="chip">⚙</span>Add structured logging and per-stage timing and success-or-fail tracing from the start, since silent partial failures — empty reviews, zero Reddit hits — are the main debugging nightmare.</li>
+        </ul>
+      </div>
+
+      <div class="room room-critic">
+        <div class="room-head"><span class="room-icon">⚠</span><h3 class="room-title">Critic</h3></div>
+        <div class="room-sub">Where does this actually fall apart?</div>
+        <ul class="room-list">
+          <li class="room-item"><span class="chip">✕</span>Running headless Playwright at real scale is slow and resource heavy; a single always-on server will choke under concurrent requests without a worker pool or external rendering service.</li>
+          <li class="room-item"><span class="chip">✕</span>Residential proxies cost real money per gigabyte and add latency, so the anti-blocking fix carries its own budget and performance tax that must be sized against expected traffic.</li>
+          <li class="room-item"><span class="chip">✕</span>The LLM token cost for raw review text at thousands of reviews per product will balloon fast unless the clustering and sampling step is actually enforced in code, not just planned.</li>
+          <li class="room-item"><span class="chip">✕</span>Scraping Amazon product pages at scale may violate its conditions of use, which is a real business risk beyond personal or low-volume use, not just a technical hurdle.</li>
+          <li class="room-item"><span class="chip">✕</span>Reddit API terms and pricing changes restrict commercial use of PRAW-sourced data at scale, which is a real risk if a side project grows.</li>
+          <li class="room-item"><span class="chip">✕</span>Clean JSON still fails silently if the reasoning inside it is wrong but well formatted; schema validation catches shape errors, not substance errors.</li>
+          <li class="room-item"><span class="chip">✕</span>Caching evidence bundles risks showing stale prices or verdicts on fast-moving sale items, undermining the value of a wait recommendation.</li>
+          <li class="room-item"><span class="chip">✕</span>A generic fallback extractor for any e-commerce site is a much harder promise than it sounds, since unstructured pages can silently produce wrong specs or prices and erode trust faster than an honest "unsupported site" message.</li>
+          <li class="room-item"><span class="chip">✕</span>Confidence scores, however computed, mean nothing to users without calibration against real outcomes, or they are just another made-up number dressed as rigor.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     04 — SYNTHESIS — THE VERDICT
+     ============================================================ -->
+<section class="verdict-section" id="synthesis">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">Synthesis</div>
+      <h2 class="section-title">The Verdict</h2>
+      <p class="section-tagline">Three techniques, one converging architecture. Here is the receipt for the session itself.</p>
+    </div>
+
+    <div class="verdict-card reveal">
+      <div class="verdict-stamp-corner">Triple&#8209;Checked</div>
+      <div class="verdict-top">
+        <div class="verdict-badge"><span class="dot"></span>Build It</div>
+        <div class="gauge-wrap">
+          <svg class="gauge" viewBox="0 0 120 120" data-pct="94">
+            <circle class="gauge-track" cx="60" cy="60" r="52"></circle>
+            <circle class="gauge-fill" cx="60" cy="60" r="52"></circle>
+          </svg>
+          <div class="gauge-label">
+            <div class="gauge-pct">94%</div>
+            <div class="gauge-caption">Session conviction score — how independently the ideas converged</div>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="verdict-section-title">📎 Evidence — cross-technique convergence</h3>
+      <ul class="evidence-list">
+        <li class="evidence-tag"><span class="ref">#102</span><span>The JSON cleanliness problem is solved identically three separate times across techniques (fixed evidence schema, strict schema validation with auto-repair, structured outputs with retry) — which converges on schema-first architecture as the settled answer, not a prompting tweak.</span></li>
+        <li class="evidence-tag"><span class="ref">#103</span><span>Scraper blocking and legal risk are answered by the same move from two techniques: treat official data providers as the primary source and raw scraping as a tiered long-tail fallback, rather than trying to out-evade Amazon.</span></li>
+        <li class="evidence-tag"><span class="ref">#104</span><span>Review-volume summarization converged independently in First Principles and the Realist room on stratified sampling plus embedding clustering of themes — a strong signal this is the right design, not a guess.</span></li>
+        <li class="evidence-tag"><span class="ref">#105</span><span>Confidence scoring was independently rejected as an LLM judgment call in three separate techniques, all landing on an explicit outside formula — the most validated decision of the session.</span></li>
+        <li class="evidence-tag"><span class="ref">#106</span><span>Canonical product identity, evidence caching, and request coalescing are one system — a product-identity-keyed evidence cache — not three separate optimizations.</span></li>
+        <li class="evidence-tag"><span class="ref">#107</span><span>Multi-persona verdicts from the Dreamer room quietly solve the Critic room's hardest unsolved problem: persona disagreement is itself a usable confidence signal, not just a flashy feature.</span></li>
+        <li class="evidence-tag"><span class="ref">#108</span><span>Citations tracing every fact to a literal source quote, and the evidence-trail UI idea, are the same mechanism — grounding is enforced by requiring citations, then displayed as a feature.</span></li>
+        <li class="evidence-tag"><span class="ref">#109</span><span>Knowing when not to give a confident answer — via evidence sparsity state, fallback confidence downgrade, and an honest "unsupported site" message — may be the real product differentiator over raw verdict accuracy.</span></li>
+      </ul>
+
+      <hr class="receipt-divider">
+
+      <h3 class="verdict-section-title">🧾 Chosen directions to carry forward</h3>
+      <div class="directions-row">
+        <span class="stamp-chip" style="--r:-3deg;">Schema-first LLM contract</span>
+        <span class="stamp-chip" style="--r:2deg;">Canonical product identity cache as backbone</span>
+        <span class="stamp-chip" style="--r:-1deg;">Stratified + clustered review summarization</span>
+        <span class="stamp-chip" style="--r:3deg;">Externally computed confidence formula</span>
+        <span class="stamp-chip" style="--r:-2deg;">Tiered site support, official APIs first</span>
+        <span class="stamp-chip" style="--r:1deg;">Streaming partial results via job queue</span>
+      </div>
+    </div>
+
+    <div class="footer-note">End of receipt · generated from .memlog.md · First Principles → Reverse Brainstorming → Disney Method → Synthesis</div>
+  </div>
+</section>
+
+<script>
+(function(){
+  // Scroll reveal
+  var els = document.querySelectorAll('.reveal');
+  if('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if(entry.isIntersecting){
+          entry.target.classList.add('in-view');
+          io.unobserve(entry.target);
+        }
+      });
+    }, {threshold:.12});
+    els.forEach(function(el){ io.observe(el); });
+  } else {
+    els.forEach(function(el){ el.classList.add('in-view'); });
+  }
+
+  // Staggered delay for strata layers and tag cards
+  document.querySelectorAll('.strata .layer').forEach(function(el, i){
+    el.style.transitionDelay = (i * 60) + 'ms';
+  });
+  document.querySelectorAll('.tag-grid .price-tag-card').forEach(function(el, i){
+    el.style.transitionDelay = (Math.min(i,10) * 40) + 'ms';
+  });
+  document.querySelectorAll('.flip-grid .flip-card').forEach(function(el, i){
+    el.style.transitionDelay = (Math.min(i,12) * 30) + 'ms';
+  });
+
+  // Flip cards: click/tap toggle (keyboard handled via :focus-visible, hover via CSS)
+  document.querySelectorAll('.flip-card').forEach(function(card){
+    card.addEventListener('click', function(){
+      card.classList.toggle('flipped');
+    });
+    card.addEventListener('keydown', function(e){
+      if(e.key === 'Enter' || e.key === ' '){
+        e.preventDefault();
+        card.classList.toggle('flipped');
+      }
+    });
+  });
+
+  // Confidence gauge fill animation
+  var gauge = document.querySelector('.gauge-fill');
+  var gaugeSvg = document.querySelector('.gauge');
+  if(gauge && gaugeSvg){
+    var pct = parseFloat(gaugeSvg.getAttribute('data-pct')) || 0;
+    var circumference = 2 * Math.PI * 52;
+    var target = circumference * (1 - pct / 100);
+    var gaugeIo = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if(entry.isIntersecting){
+          requestAnimationFrame(function(){
+            gauge.style.strokeDashoffset = target;
+          });
+          gaugeIo.disconnect();
+        }
+      });
+    }, {threshold:.4});
+    gaugeIo.observe(gaugeSvg);
+  }
+
+  // Scroll-spy for nav tabs
+  var sections = ['hero','first-principles','reverse','disney','synthesis'].map(function(id){
+    return document.getElementById(id);
+  }).filter(Boolean);
+  var tabs = document.querySelectorAll('.tab-btn');
+  function setActive(id){
+    tabs.forEach(function(t){
+      t.classList.toggle('active', t.getAttribute('data-target') === id);
+    });
+  }
+  if('IntersectionObserver' in window){
+    var spy = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if(entry.isIntersecting){ setActive(entry.target.id); }
+      });
+    }, {rootMargin:'-45% 0px -45% 0px'});
+    sections.forEach(function(s){ spy.observe(s); });
+  }
+})();
+</script>
+
+</body>
+</html>
