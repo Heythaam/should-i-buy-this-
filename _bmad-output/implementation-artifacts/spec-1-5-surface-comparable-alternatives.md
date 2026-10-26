@@ -2,7 +2,7 @@
 title: 'Surface comparable alternatives'
 type: 'feature'
 created: '2026-10-26'
-status: 'in-progress'
+status: 'done'
 route: 'dispatch'
 review_loop_iteration: 0
 baseline_commit: '9786236bdb226ca110cc3ec0109804ca4ca7dfc6'
@@ -81,8 +81,9 @@ context: ['docs/architecture/architecture-should-i-buy-this-2026-10-26/ARCHITECT
 
 - Implemented all seven Code Map items as specified: `ProductFacts.category`, the `find_candidate_alternatives()` Protocol method, the scraper-side `_extract_category()`/`build_search_url()`/`parse_search_results()`/`ScraperTier2Source.find_candidate_alternatives()`, and the pure `select_alternatives()` in a new `app/pipeline/alternatives.py`.
 - `ScraperTier2Source._render()` previously hardcoded waiting on `#productTitle`, which doesn't exist on a search-results page. Generalized it with a `wait_selector` parameter (default unchanged at `#productTitle`) so `find_candidate_alternatives()` can wait on `[data-component-type="s-search-result"]` instead -- additive, backward-compatible, and the only deviation from the Code Map's literal text (which didn't mention `_render` needing a change, but "reuses the existing render/retry/timeout pattern" requires it, since the pattern as written only targeted the product-page shape).
-- 23 new tests added (9 in `test_alternatives.py`, 14 in `test_scraper_tier2.py`), no existing tests modified in a way that changes their assertions. Full suite: 101/101 passing, `ruff check app/ tests/` clean.
-- This is implementation only -- no independent review pass (blind-hunter/edge-case-hunter/verification-gap) was run, so no Review Triage Log entries exist yet and `status` is left at `in-progress` rather than advanced to `done`.
+- 23 new tests added (9 in `test_alternatives.py`, 14 in `test_scraper_tier2.py`), no existing tests modified in a way that changes their assertions.
+- **Review patch round:** all 8 `patch`-routed findings were fixed: `find_candidate_alternatives()`/`build_search_url()` now guard `if not category: return []` before building the search URL so a missing or empty breadcrumb category degrades to `[]` instead of raising; `select_alternatives()`'s price band is now computed with `sorted()` so it's correct for a negative `reference.price`; candidates are deduplicated by `canonical_product_id` (first occurrence wins) before the top 3 are taken; `_extract_search_result_link()` now checks for a non-empty `href` before accepting a selector match instead of stopping at the first matching element; `find_candidate_alternatives()` now logs on the success path (including the zero-result-cards case), not just on retry/failure; a test covering `select_alternatives()`'s documented "doesn't re-check category" behavior was added; a test covering `parse_search_results()` skipping a card with an absolute off-Amazon href was added; and the tie-breaking rule for equidistant candidates (stable sort over input order) is now documented in `select_alternatives()`'s docstring. One finding was rejected (the first-match `.a-price .a-offscreen` selector ambiguity mirrors Story 1.1's already-accepted pattern and wasn't re-flagged there).
+- Full suite after the patch round: 105/105 passing, `ruff check app/ tests/` clean.
 
 ## Spec Change Log
 
