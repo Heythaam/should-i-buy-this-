@@ -1,0 +1,7 @@
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-1-resolve-url-to-canonical-product.md`
+  summary: Support Amazon short links (`amzn.to`, `a.co`) in `canonicalize()`.
+  evidence: Confirmed gap found during Story 1.1 review — these are real, commonly-pasted Amazon product links, but resolving them requires following an HTTP redirect before ASIN extraction, which is a materially different (async/network-calling) design than `canonicalize()`'s current pure-function contract (AD-2). Not in Story 1.1's frozen scope; needs a deliberate design decision (e.g. a separate redirect-resolution step) in a future story.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-1-resolve-url-to-canonical-product.md`
+  summary: `ScraperTier2Source.fetch()`'s `except Exception` does not catch `asyncio.CancelledError`, in tension with the frozen "never raises an unhandled exception out of fetch() (AD-4)... for any reason" wording.
+  evidence: Verified as a real gap — `CancelledError` is a `BaseException` in Python 3.8+, not caught by `except Exception`. Currently dormant: no orchestrator exists yet, so nothing cancels in-flight `fetch()` calls. Blindly catching and swallowing `CancelledError` is itself an asyncio anti-pattern that could break future cooperative cancellation, so this needs a human/design call (swallow it vs. treat cancellation as an explicit, documented exception to the "never raises" rule) once an orchestrator with real cancellation semantics is built (Epic 4 / Story 1.9 territory), not a blind one-line patch now.
