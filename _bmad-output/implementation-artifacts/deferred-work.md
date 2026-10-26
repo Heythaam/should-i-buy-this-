@@ -5,3 +5,15 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-1-resolve-url-to-canonical-product.md`
   summary: `ScraperTier2Source.fetch()`'s `except Exception` does not catch `asyncio.CancelledError`, in tension with the frozen "never raises an unhandled exception out of fetch() (AD-4)... for any reason" wording.
   evidence: Verified as a real gap — `CancelledError` is a `BaseException` in Python 3.8+, not caught by `except Exception`. Currently dormant: no orchestrator exists yet, so nothing cancels in-flight `fetch()` calls. Blindly catching and swallowing `CancelledError` is itself an asyncio anti-pattern that could break future cooperative cancellation, so this needs a human/design call (swallow it vs. treat cancellation as an explicit, documented exception to the "never raises" rule) once an orchestrator with real cancellation semantics is built (Epic 4 / Story 1.9 territory), not a blind one-line patch now.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-2-fail-honestly-on-unreadable-page.md`
+  summary: `resolve_product_facts()` does not catch an exception raised directly by an injected `ProductSource.fetch()` implementation (as opposed to one that returns a typed `SourceFailure`).
+  evidence: Verified against the only `ProductSource` that exists today (`ScraperTier2Source`), which never raises (proven in Story 1.1) — so this is currently unreachable. Would only matter if a future Tier 1/3 source implementation breaks its own never-raises contract; if true, severity would be `medium` (an uncaught exception reaching whatever eventually calls `resolve_product_facts()`). Needs a human/design call on how broadly to guard (and the matching test coverage) once a second `ProductSource` implementation actually exists.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-2-fail-honestly-on-unreadable-page.md`
+  summary: `resolve_product_facts()` applies no timeout of its own around `await source.fetch(url)`.
+  evidence: AD-9 assigns timeout responsibility to the stage level, already satisfied today by `ScraperTier2Source`'s own 20s timeout (Story 1.1). Would only matter for a future `ProductSource` implementation that fails to bound its own `fetch()`; if true, severity would be `medium` (indefinite hang). Revisit if/when a second source implementation is added without its own timeout.
+
+- source_spec: none
+  summary: Run `ruff format .` across the whole repo as a standalone chore — three Story 1.1 files (`app/pipeline/canonicalize.py`, `app/pipeline/sources/scraper_tier2.py`, `tests/pipeline/sources/test_scraper_tier2.py`) are not `ruff format`-clean.
+  evidence: Found during Story 1.2's independent re-verification via `uv run ruff format --check app/ tests/` — three files would be reformatted (none touched by Story 1.2). `ruff check` (lint) stays clean since none of the formatting deviations are lint errors, only style drift. Out of Story 1.2's scope since its own spec forbids touching Story 1.1's modules; a one-off repo-wide format pass is the right fix, not a story-scoped patch.

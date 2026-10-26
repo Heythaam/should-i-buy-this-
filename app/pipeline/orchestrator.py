@@ -1,0 +1,57 @@
+"""The pipeline orchestrator (core/shared, AD-1, AD-11).
+
+`resolve_product_facts()` is the only place that decides whether a request
+became `ProductFacts` or the FR-3-level `InsufficientDataResult` (AD-4): it
+calls `canonicalize()` then `source.fetch()`, and never lets a
+`canonicalize()` exception or a `SourceFailure` propagate past itself
+unconverted. No FastAPI app or LLM synthesis exists yet, so "a failure never
+reaches synthesis" holds structurally -- this function has no code path that
+calls one.
+
+Intentionally minimal (one function) rather than building out job/queue/SSE
+machinery now -- that belongs to Story 1.9 (AD-10); AD-11 lets that story
+extend this same file in place.
+"""
+
+import logging
+
+from app.models.product import InsufficientDataResult, ProductFacts, SourceFailure
+from app.pipeline.canonicalize import InvalidProductURLError, canonicalize
+from app.pipeline.sources.base import ProductSource
+
+logger = logging.getLogger(__name__)
+
+
+async def resolve_product_facts(
+    url: str, source: ProductSource
+) -> ProductFacts | InsufficientDataResult:
+    """Resolve `url` to `ProductFacts`, or an honest `InsufficientDataResult`.
+
+    Never raises (AD-4): a `canonicalize()` failure (non-Amazon/malformed
+    URL) and a `source.fetch()` degradation (blocked/CAPTCHA/unsupported
+    layout) both map to `InsufficientDataResult` instead of propagating.
+    `source` is injected rather than constructed here, so a future Tier 1/3
+    source can be passed in without changing this function.
+    """
+    try:
+        canonicalize(url)
+    except InvalidProductURLError as exc:
+        logger.warning("resolve_product_facts: invalid_url for %s: %s", url, exc)
+        return InsufficientDataResult(reason="invalid_url", detail=str(exc))
+
+    result = await source.fetch(url)
+
+    if isinstance(result, SourceFailure):
+        logger.warning(
+            "resolve_product_facts: %s for %s (source_tier=%s)",
+            result.reason,
+            url,
+            result.source_tier,
+        )
+        return InsufficientDataResult(
+            reason=result.reason,
+            detail=result.detail,
+            source_tier=result.source_tier,
+        )
+
+    return result

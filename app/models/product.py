@@ -42,3 +42,22 @@ class SourceFailure(BaseModel):
     source_tier: SourceTier
     reason: str
     detail: str | None = None
+
+
+class InsufficientDataResult(BaseModel):
+    """The FR-3-level "insufficient data" outcome (AD-4).
+
+    Returned by `pipeline/orchestrator.py::resolve_product_facts` whenever a
+    URL can't be canonicalized or a `ProductSource.fetch()` call degrades to
+    a `SourceFailure` -- the one explicit, user-facing result a future
+    API/UI renders instead of a fabricated or partial `Verdict`.
+
+    Kept distinct from `SourceFailure`: `SourceFailure` is a scraper-tier's
+    internal, per-tier signal (AD-3); this is the pipeline-level outcome,
+    so collapsing the two would couple the eventual frontend contract to the
+    scraper's internal vocabulary.
+    """
+
+    reason: str
+    detail: str | None = None
+    source_tier: SourceTier | None = None
