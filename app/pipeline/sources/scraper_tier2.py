@@ -107,6 +107,37 @@ def _parse_price_text(text: str) -> float | None:
         return None
 
 
+_REVIEW_COUNT_PATTERN = re.compile(r"([\d,.]+)\s*ratings?", re.IGNORECASE)
+
+
+def _extract_review_count(soup: BeautifulSoup) -> int | None:
+    """Parse the page's aggregate ratings-count text (e.g. "1,234 ratings"),
+    shown near the title via `#acrCustomerReviewText` on a standard product
+    page.
+
+    Anchored to the "rating(s)" phrase (mirroring `_RATING_PATTERN`'s anchor
+    to "out of 5 stars" below) so it never matches an unrelated digit run in
+    the element's text. Both `,` and `.` are stripped before parsing --
+    review counts have no fractional use case, so a dot-grouped EU-style
+    count (e.g. "1.234 ratings") is treated the same as "1,234 ratings"
+    rather than misread as a decimal.
+
+    Returns `None` -- rather than guessing -- when the element is missing or
+    its text doesn't contain a recognizable count (AD-4): this is Story 1.4's
+    "unknown signal" case, distinct from a genuinely low count.
+    """
+    count_el = soup.select_one("#acrCustomerReviewText")
+    if not count_el:
+        return None
+    match = _REVIEW_COUNT_PATTERN.search(count_el.get_text(strip=True))
+    if not match:
+        return None
+    try:
+        return int(match.group(1).replace(",", "").replace(".", ""))
+    except ValueError:
+        return None
+
+
 def _extract_specs(soup: BeautifulSoup) -> dict[str, str]:
     specs: dict[str, str] = {}
     for row in soup.select("#productDetails_techSpec_section_1 tr"):
@@ -139,6 +170,7 @@ def parse_product_facts(html: str, canonical_id: CanonicalProductId) -> ProductF
         price=_extract_price(soup),
         specs=_extract_specs(soup),
         source_tier=SourceTier.TIER_2,
+        review_count=_extract_review_count(soup),
     )
 
 

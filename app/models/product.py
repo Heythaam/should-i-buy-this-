@@ -30,6 +30,7 @@ class ProductFacts(BaseModel):
     price: float | None = None
     specs: dict[str, str] = Field(default_factory=dict)
     source_tier: SourceTier
+    review_count: int | None = Field(default=None, ge=0)
 
 
 class SourceFailure(BaseModel):

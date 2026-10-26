@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pydantic
 import pytest
+from bs4 import BeautifulSoup
 
 from app.models.product import ProductFacts, SourceFailure, SourceTier
 from app.models.review import Review
@@ -20,6 +21,7 @@ from app.pipeline.sources import scraper_tier2 as scraper_tier2_module
 from app.pipeline.sources.scraper_tier2 import (
     ProductPageParseError,
     ScraperTier2Source,
+    _extract_review_count,
     _parse_price_text,
     build_proxy_config,
     parse_product_facts,
@@ -52,6 +54,7 @@ def test_parse_basic_fixture_yields_title_price_specs():
     assert facts.price == pytest.approx(39.99)
     assert facts.specs["Color"] == "Charcoal"
     assert facts.specs["Brand"] == "Amazon"
+    assert facts.review_count == 1234
 
 
 def test_parse_variant_fixture_yields_that_variants_own_facts():
@@ -64,6 +67,7 @@ def test_parse_variant_fixture_yields_that_variants_own_facts():
     assert "Twilight Blue" in facts.title
     assert facts.specs["Color"] == "Twilight Blue"
     assert facts.price == pytest.approx(34.99)
+    assert facts.review_count == 7
 
 
 def test_parse_page_without_title_raises_parse_error():
@@ -111,6 +115,79 @@ def test_extract_specs_keeps_first_value_on_duplicate_label():
     facts = parse_product_facts(html, canonical_id)
 
     assert facts.specs["Color"] == "Charcoal"
+
+
+def test_extract_review_count_parses_comma_separated_ratings_text():
+    soup = BeautifulSoup(
+        '<span id="acrCustomerReviewText">1,234 ratings</span>', "html.parser"
+    )
+
+    assert _extract_review_count(soup) == 1234
+
+
+def test_extract_review_count_parses_small_count():
+    soup = BeautifulSoup(
+        '<span id="acrCustomerReviewText">7 ratings</span>', "html.parser"
+    )
+
+    assert _extract_review_count(soup) == 7
+
+
+def test_extract_review_count_parses_eu_dot_grouped_ratings_text():
+    soup = BeautifulSoup(
+        '<span id="acrCustomerReviewText">1.234 ratings</span>', "html.parser"
+    )
+
+    assert _extract_review_count(soup) == 1234
+
+
+def test_extract_review_count_zero_ratings():
+    soup = BeautifulSoup(
+        '<span id="acrCustomerReviewText">0 ratings</span>', "html.parser"
+    )
+
+    assert _extract_review_count(soup) == 0
+
+
+def test_parse_product_facts_zero_ratings():
+    html = """
+    <html><body>
+      <span id="productTitle">Widget</span>
+      <span id="acrCustomerReviewText">0 ratings</span>
+    </body></html>
+    """
+    canonical_id = canonicalize("https://www.amazon.com/dp/B08N5WRWNW")
+
+    facts = parse_product_facts(html, canonical_id)
+
+    assert facts.review_count == 0
+
+
+def test_extract_review_count_none_when_element_missing():
+    soup = BeautifulSoup("<html><body><span id='productTitle'>X</span></body></html>", "html.parser")
+
+    assert _extract_review_count(soup) is None
+
+
+def test_extract_review_count_none_when_text_has_no_digits():
+    soup = BeautifulSoup(
+        '<span id="acrCustomerReviewText">No ratings yet</span>', "html.parser"
+    )
+
+    assert _extract_review_count(soup) is None
+
+
+def test_parse_product_facts_review_count_none_when_element_missing():
+    html = """
+    <html><body>
+      <span id="productTitle">Widget</span>
+    </body></html>
+    """
+    canonical_id = canonicalize("https://www.amazon.com/dp/B08N5WRWNW")
+
+    facts = parse_product_facts(html, canonical_id)
+
+    assert facts.review_count is None
 
 
 def test_build_proxy_config_none_when_unset():
