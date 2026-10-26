@@ -1,39 +1,68 @@
-"""Tests for `resolve_product_facts()` (AD-1, AD-4).
+"""Tests for `resolve_product_facts()` and `assemble_evidence_bundle()`
+(AD-1, AD-4, AD-5).
 
 Covers the story's I/O & Edge-Case Matrix using a stub `ProductSource` --
-no real scraper/network needed, and no change to Story 1.1's modules.
+no real scraper/network needed, and no change to Story 1.1-1.5's modules.
 """
 
 import asyncio
 
 import pytest
 
+from app.models.evidence import EvidenceBundle
 from app.models.product import InsufficientDataResult, ProductFacts, SourceFailure, SourceTier
-from app.pipeline.orchestrator import resolve_product_facts
+from app.models.review import Review
+from app.pipeline.orchestrator import assemble_evidence_bundle, resolve_product_facts
 
 VALID_URL = "https://www.amazon.com/dp/B08N5WRWNW"
 
 
 class _StubSource:
-    """A `ProductSource` stub returning a pre-set result and recording calls."""
+    """A `ProductSource` stub returning pre-set results and recording calls."""
 
-    def __init__(self, result: ProductFacts | SourceFailure) -> None:
+    def __init__(
+        self,
+        result: ProductFacts | SourceFailure,
+        reviews: list[Review] | None = None,
+        alternatives: list[ProductFacts] | None = None,
+    ) -> None:
         self._result = result
+        self._reviews = reviews if reviews is not None else []
+        self._alternatives = alternatives if alternatives is not None else []
         self.fetch_calls: list[str] = []
+        self.fetch_reviews_calls: list[str] = []
+        self.find_candidate_alternatives_calls: list[str | None] = []
 
     async def fetch(self, url: str) -> ProductFacts | SourceFailure:
         self.fetch_calls.append(url)
         return self._result
 
+    async def fetch_reviews(self, url: str) -> list[Review]:
+        self.fetch_reviews_calls.append(url)
+        return self._reviews
 
-def _facts() -> ProductFacts:
+    async def find_candidate_alternatives(self, category: str) -> list[ProductFacts]:
+        self.find_candidate_alternatives_calls.append(category)
+        return self._alternatives
+
+
+def _facts(
+    category: str | None = None,
+    review_count: int | None = None,
+) -> ProductFacts:
     return ProductFacts(
         canonical_product_id="amazon:B08N5WRWNW",
         title="Echo Dot",
         price=39.99,
         specs={"Color": "Charcoal"},
         source_tier=SourceTier.TIER_2,
+        category=category,
+        review_count=review_count,
     )
+
+
+def _review(rating: int = 5, body: str = "Great product.") -> Review:
+    return Review(rating=rating, body=body)
 
 
 def test_valid_url_with_successful_fetch_returns_facts_unchanged():
@@ -105,3 +134,130 @@ def test_source_failure_never_raises_and_never_yields_partial_facts():
     assert isinstance(result, InsufficientDataResult)
     assert not isinstance(result, ProductFacts)
     assert result.detail is None
+
+
+# -- assemble_evidence_bundle() -----------------------------------------
+#
+# Covers the story's I/O & Edge-Case Matrix for Evidence Bundle assembly.
+
+
+def test_happy_path_assembles_bundle_with_all_four_fields_populated():
+    facts = _facts(category="Smart Speakers", review_count=25)
+    reviews = [_review(rating=5), _review(rating=1, body="Broke after a week.")]
+    alt = _facts(category="Smart Speakers")
+    alt = alt.model_copy(update={"canonical_product_id": "amazon:ALT0000001"})
+    source = _StubSource(facts, reviews=reviews, alternatives=[alt])
+
+    result = asyncio.run(assemble_evidence_bundle(VALID_URL, source))
+
+    assert isinstance(result, EvidenceBundle)
+    assert result.product_facts is facts
+    assert result.reviews == reviews
+    assert result.review_signal.is_low_signal is False
+    assert len(result.alternatives) == 1
+    assert result.alternatives[0].canonical_product_id == "amazon:ALT0000001"
+    # Every sub-stage ran, in order, with the expected inputs.
+    assert source.fetch_calls == [VALID_URL]
+    assert source.fetch_reviews_calls == [VALID_URL]
+    assert source.find_candidate_alternatives_calls == ["Smart Speakers"]
+
+
+def test_insufficient_extraction_short_circuits_before_review_or_alternatives_calls():
+    failure = SourceFailure(source_tier=SourceTier.TIER_2, reason="fetch_failed")
+    source = _StubSource(failure)
+
+    result = asyncio.run(assemble_evidence_bundle(VALID_URL, source))
+
+    assert isinstance(result, InsufficientDataResult)
+    assert not isinstance(result, EvidenceBundle)
+    # No review or alternatives work was ever started.
+    assert source.fetch_reviews_calls == []
+    assert source.find_candidate_alternatives_calls == []
+
+
+def test_invalid_url_short_circuits_before_fetch_review_or_alternatives_calls():
+    source = _StubSource(_facts())
+
+    result = asyncio.run(assemble_evidence_bundle("https://www.ebay.com/itm/123456", source))
+
+    assert isinstance(result, InsufficientDataResult)
+    assert result.reason == "invalid_url"
+    assert source.fetch_calls == []
+    assert source.fetch_reviews_calls == []
+    assert source.find_candidate_alternatives_calls == []
+
+
+def test_no_reviews_found_yields_empty_reviews_and_low_signal():
+    facts = _facts(category="Smart Speakers", review_count=25)
+    source = _StubSource(facts, reviews=[])
+
+    result = asyncio.run(assemble_evidence_bundle(VALID_URL, source))
+
+    assert isinstance(result, EvidenceBundle)
+    assert result.reviews == []
+    # review_signal is driven by facts.review_count (25, >= threshold), not
+    # by the empty fetched/sampled review list -- per this story's Design
+    # Notes, the two are deliberately independent signals.
+    assert result.review_signal.is_low_signal is False
+
+
+def test_low_review_count_on_facts_yields_low_signal_even_with_reviews_present():
+    facts = _facts(category="Smart Speakers", review_count=3)
+    source = _StubSource(facts, reviews=[_review()])
+
+    result = asyncio.run(assemble_evidence_bundle(VALID_URL, source))
+
+    assert isinstance(result, EvidenceBundle)
+    assert result.review_signal.is_low_signal is True
+
+
+def test_unknown_review_count_yields_low_signal_with_distinct_reason():
+    facts = _facts(category="Smart Speakers", review_count=None)
+    source = _StubSource(facts, reviews=[_review()])
+
+    result = asyncio.run(assemble_evidence_bundle(VALID_URL, source))
+
+    assert isinstance(result, EvidenceBundle)
+    assert result.review_signal.is_low_signal is True
+    # Distinct reason from the below-threshold case (test above) -- unknown
+    # review count is "absence of evidence", not "evidence of low volume".
+    assert result.review_signal.reason is not None
+    assert "unknown" in result.review_signal.reason.lower()
+
+
+def test_no_alternatives_found_yields_empty_alternatives_list():
+    facts = _facts(category="Smart Speakers", review_count=25)
+    source = _StubSource(facts, alternatives=[])
+
+    result = asyncio.run(assemble_evidence_bundle(VALID_URL, source))
+
+    assert isinstance(result, EvidenceBundle)
+    assert result.alternatives == []
+
+
+def test_product_with_no_category_returns_empty_alternatives_without_raising():
+    facts = _facts(category=None, review_count=25)
+    source = _StubSource(facts)
+
+    result = asyncio.run(assemble_evidence_bundle(VALID_URL, source))
+
+    assert isinstance(result, EvidenceBundle)
+    assert result.alternatives == []
+    # `None` is passed straight through to find_candidate_alternatives(),
+    # which already guards this case (Story 1.5) -- no extra guard needed
+    # here, and no exception propagates.
+    assert source.find_candidate_alternatives_calls == [None]
+
+
+def test_product_with_empty_string_category_returns_empty_alternatives_without_raising():
+    facts = _facts(category="", review_count=25)
+    source = _StubSource(facts)
+
+    result = asyncio.run(assemble_evidence_bundle(VALID_URL, source))
+
+    assert isinstance(result, EvidenceBundle)
+    assert result.alternatives == []
+    # `""` is passed straight through to find_candidate_alternatives(),
+    # which guards it identically to `None` (Story 1.5) -- no extra guard
+    # needed here, and no exception propagates.
+    assert source.find_candidate_alternatives_calls == [""]

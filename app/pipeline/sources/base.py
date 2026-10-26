@@ -36,7 +36,7 @@ class ProductSource(Protocol):
         """
         ...
 
-    async def find_candidate_alternatives(self, category: str) -> list[ProductFacts]:
+    async def find_candidate_alternatives(self, category: str | None) -> list[ProductFacts]:
         """Search for same-category candidate products for `category`.
 
         Never raises (AD-4, AD-9): any failure -- an unreachable or blocked

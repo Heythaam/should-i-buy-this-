@@ -8,15 +8,26 @@ unconverted. No FastAPI app or LLM synthesis exists yet, so "a failure never
 reaches synthesis" holds structurally -- this function has no code path that
 calls one.
 
-Intentionally minimal (one function) rather than building out job/queue/SSE
+`assemble_evidence_bundle()` (Story 1.6) composes `resolve_product_facts()`
+with Story 1.3-1.5's review/alternatives functions into one `EvidenceBundle`
+-- the one consistent record a future Verdict (Story 1.7) is grounded in. It
+reuses those functions exactly as they are; its only logic is the
+short-circuit-on-insufficient-data sequencing (see this story's spec Design
+Notes).
+
+Intentionally minimal (two functions) rather than building out job/queue/SSE
 machinery now -- that belongs to Story 1.9 (AD-10); AD-11 lets that story
 extend this same file in place.
 """
 
 import logging
 
+from app.models.evidence import EvidenceBundle
 from app.models.product import InsufficientDataResult, ProductFacts, SourceFailure
+from app.pipeline.alternatives import select_alternatives
 from app.pipeline.canonicalize import InvalidProductURLError, canonicalize
+from app.pipeline.review_sampling import sample_reviews
+from app.pipeline.review_signal import assess_review_signal
 from app.pipeline.sources.base import ProductSource
 
 logger = logging.getLogger(__name__)
@@ -55,3 +66,59 @@ async def resolve_product_facts(
         )
 
     return result
+
+
+async def assemble_evidence_bundle(
+    url: str, source: ProductSource
+) -> EvidenceBundle | InsufficientDataResult:
+    """Assemble the one `EvidenceBundle` a future Verdict is grounded in.
+
+    Composes, in order, `resolve_product_facts()`, `source.fetch_reviews()`,
+    `sample_reviews()`, `assess_review_signal()`,
+    `source.find_candidate_alternatives()`, and `select_alternatives()`.
+
+    A failed or insufficient extraction short-circuits immediately (AD-4):
+    `resolve_product_facts()`'s `InsufficientDataResult` is returned
+    unchanged, before any review or alternatives call is made -- Story 1.2's
+    honest-failure gate is never bypassed. Every sub-stage's degraded/empty
+    result (no reviews, low review signal, no alternatives) is carried
+    through into the bundle as-is -- this function adds no interpretation of
+    its own.
+    """
+    facts_or_insufficient = await resolve_product_facts(url, source)
+    if isinstance(facts_or_insufficient, InsufficientDataResult):
+        return facts_or_insufficient
+
+    facts = facts_or_insufficient
+
+    reviews = await source.fetch_reviews(url)
+    if not reviews:
+        logger.warning("assemble_evidence_bundle: no_reviews_found for %s", url)
+    sampled_reviews = sample_reviews(reviews)
+
+    # Signal is computed from the page's aggregate `review_count` (Story
+    # 1.4's own design), not `len(reviews)`/`len(sampled_reviews)` -- the
+    # bounded sample is deliberately capped and would under-count on
+    # popular products.
+    review_signal = assess_review_signal(facts.review_count)
+    if review_signal.is_low_signal:
+        logger.warning(
+            "assemble_evidence_bundle: low_review_signal for %s: %s",
+            url,
+            review_signal.reason,
+        )
+
+    # `facts.category` may be `None` or `""` here; `find_candidate_alternatives()`
+    # already guards both cases (Story 1.5) and returns `[]` rather than
+    # raising, so no extra guard is needed at this call site.
+    candidates = await source.find_candidate_alternatives(facts.category)
+    alternatives = select_alternatives(facts, candidates)
+    if not alternatives:
+        logger.warning("assemble_evidence_bundle: no_alternatives_found for %s", url)
+
+    return EvidenceBundle(
+        product_facts=facts,
+        reviews=sampled_reviews,
+        review_signal=review_signal,
+        alternatives=alternatives,
+    )
