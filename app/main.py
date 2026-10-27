@@ -16,20 +16,31 @@ specifically so tests can override them via `app.dependency_overrides` with
 stub `ProductSource`/`LLMClient` implementations (this project's established
 port-based testing convention), rather than monkeypatching module-level
 globals.
+
+Story 1.9 (AD-10) additionally adds `GET /jobs` and `GET /jobs/{job_id}/events`
+below: a per-job `asyncio.Queue`-backed event stream so the client can see
+per-stage progress instead of a frozen page during the ~20-30s pipeline run.
+`GET /` above is untouched and remains the no-JS fallback -- it still blocks
+until `produce_verdict()` resolves, exactly as before this story.
 """
 
+import asyncio
+import json
 import logging
+from collections.abc import AsyncIterator
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from app.jobs import CLOSE_SENTINEL, create_job, get_job_queue, remove_job, run_job
 from app.models.product import InsufficientDataResult
 from app.models.verdict import Verdict
 from app.pipeline.llm_client import LLMClient, OpenAIClient
 from app.pipeline.orchestrator import produce_verdict
+from app.pipeline.result_kind import result_kind as compute_result_kind
 from app.pipeline.sources.base import ProductSource
 from app.pipeline.sources.scraper_tier2 import ScraperTier2Source
 from app.settings import Settings
@@ -46,17 +57,17 @@ _settings = Settings()
 _product_source = ScraperTier2Source(_settings)
 _llm_client = OpenAIClient(_settings)
 
-# This story's own UI-layer calibration (see the spec's Design Notes) --
-# separate from `compute_confidence()`'s internal weights (Story 1.7).
-# Neither the PRD nor the architecture names an exact cutoff for "visually
-# distinguish a low-confidence result," only that one must exist
-# (FR-13/NFR-8); a future story can retune this without touching
-# `compute_confidence()`.
-_LOW_CONFIDENCE_THRESHOLD = 0.5
-
 app = FastAPI(title="Should I Buy This?")
 app.mount("/static", StaticFiles(directory=_APP_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=_APP_DIR / "templates")
+
+# Holds every `run_job()` background task while it runs. `asyncio.create_task()`
+# on its own leaves the event loop holding only a weak reference to the task
+# (per `asyncio.create_task()`'s own documentation), so an otherwise-unreferenced
+# task can be garbage-collected mid-run. Adding it here, then discarding it via
+# `add_done_callback()` once it finishes, keeps a strong reference alive for
+# exactly as long as needed and no longer.
+_background_tasks: set[asyncio.Task] = set()
 
 
 def get_product_source() -> ProductSource:
@@ -79,23 +90,6 @@ def get_llm_client() -> LLMClient:
     OpenAI call ever happens in a test run.
     """
     return _llm_client
-
-
-def _result_kind(result: Verdict | InsufficientDataResult) -> str:
-    """Classify `result` into the one of three styling buckets this story's
-    I/O & Edge-Case Matrix requires: `"confident"`, `"low_confidence"`, or
-    `"insufficient_data"`. Drives `class="result result--{{ result_kind }}"`
-    in the template -- never the same class for two different kinds.
-    """
-    if isinstance(result, InsufficientDataResult):
-        return "insufficient_data"
-    # `<` vs `<=` at the exact threshold is moot in practice: an exact tie
-    # is mathematically unreachable given `compute_confidence()`'s discrete
-    # 0.015-increment components; `<` is used for the unambiguous case
-    # (values strictly above the threshold) where the choice does matter.
-    if result.confidence < _LOW_CONFIDENCE_THRESHOLD:
-        return "low_confidence"
-    return "confident"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -121,10 +115,95 @@ async def index(
         except Exception as exc:
             logger.exception("index: unexpected error while producing verdict for %s", url)
             result = InsufficientDataResult(reason="unexpected_error", detail=str(exc))
-        result_kind = _result_kind(result)
+        result_kind = compute_result_kind(result)
 
     return templates.TemplateResponse(
         request,
         "index.html",
         {"url": url, "result": result, "result_kind": result_kind},
+    )
+
+
+def _format_sse_event(event: str, data: dict) -> str:
+    """Format one SSE `event:`/`data:` pair. `data` is JSON-encoded on one
+    line -- SSE's wire format splits on newlines, so the payload must never
+    contain a literal unescaped newline, which `json.dumps()` guarantees."""
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+async def _stream_job_events(job_id: str, queue: "asyncio.Queue") -> AsyncIterator[str]:
+    """Read `queue` until `CLOSE_SENTINEL`, yielding one SSE event per item.
+
+    A `QueueProgressPublisher` item (`{"stage": ...}`, see `pipeline/progress.py`)
+    becomes an `event: stage` frame. `run_job()`'s own final payload
+    (`{"event": "result", "result_kind": ..., "result": ...}`, see
+    `app/jobs.py`) becomes the one `event: result` frame that always
+    immediately precedes `CLOSE_SENTINEL` -- this generator returns right
+    after yielding it, closing the stream (this story's I/O Matrix).
+
+    Once `CLOSE_SENTINEL` is read, removes `job_id` from the job store
+    (`remove_job()`) -- otherwise `get_job_queue(job_id)` would keep
+    returning this same, already-drained queue forever, and a later request
+    for the same job id (a page reload, or `EventSource`'s own
+    auto-reconnect) would hang on `await queue.get()` with nothing left to
+    ever fill it, instead of correctly 404-ing.
+    """
+    while True:
+        item = await queue.get()
+        if item is CLOSE_SENTINEL:
+            remove_job(job_id)
+            return
+        if "stage" in item:
+            yield _format_sse_event("stage", {"stage": item["stage"]})
+        else:
+            yield _format_sse_event(
+                "result",
+                {"result_kind": item["result_kind"], "result": item["result"]},
+            )
+
+
+@app.get("/jobs")
+async def create_job_route(
+    url: str,
+    source: ProductSource = Depends(get_product_source),
+    llm: LLMClient = Depends(get_llm_client),
+) -> dict:
+    """Create a job for `url` and schedule its pipeline run in the background.
+
+    Returns `{"job_id": ...}` immediately -- before the pipeline itself has
+    even started -- so the client can open `GET /jobs/{job_id}/events` right
+    away. `url` has no default, so FastAPI itself returns a 422 when it's
+    missing, matching this story's I/O Matrix ("No `url` param to `/jobs`").
+
+    The scheduled task is kept in `_background_tasks` until it finishes --
+    `asyncio.create_task()` on its own leaves the event loop holding only a
+    weak reference, so an unreferenced task can otherwise be garbage
+    collected mid-run.
+    """
+    job_id = create_job()
+    task = asyncio.create_task(run_job(job_id, url, source, llm))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return {"job_id": job_id}
+
+
+@app.get("/jobs/{job_id}/events")
+async def job_events(job_id: str) -> StreamingResponse:
+    """Stream `job_id`'s SSE event stream, or a 404 for an unknown job id.
+
+    `media_type="text/event-stream"` plus `_stream_job_events()` below is
+    the entire implementation: zero or more `event: stage` events, then
+    exactly one `event: result` event, then the stream closes (this story's
+    I/O Matrix) -- never a hanging connection for a bad `job_id`. The extra
+    headers disable any intermediary/proxy response buffering so events
+    actually reach the client as they're published rather than being held
+    back until the stream closes.
+    """
+    queue = get_job_queue(job_id)
+    if queue is None:
+        raise HTTPException(status_code=404, detail="unknown job_id")
+    return StreamingResponse(
+        _stream_job_events(job_id, queue),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

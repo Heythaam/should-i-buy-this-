@@ -418,3 +418,34 @@ def test_theme_call_uses_cheap_model_and_synthesis_call_uses_strong_model(
     assert llm.calls[0]["response_model"] is ThemeClusters
     assert llm.calls[1]["model"] == "test-strong-model-override"
     assert llm.calls[1]["response_model"] is DraftVerdict
+
+
+# -- Progress publishing (Story 1.9, AD-10) ---------------------------------
+
+
+class _StubProgressPublisher:
+    def __init__(self) -> None:
+        self.stages: list[str] = []
+
+    async def publish(self, stage: str) -> None:
+        self.stages.append(stage)
+
+
+def test_synthesize_verdict_publishes_synthesizing_verdict_stage(stub_llm_client):
+    bundle = _bundle()
+    llm = stub_llm_client([_themes(), _resolvable_draft()])
+    publisher = _StubProgressPublisher()
+
+    result = asyncio.run(synthesize_verdict(bundle, llm, publisher))
+
+    assert isinstance(result, Verdict)
+    assert publisher.stages == ["synthesizing_verdict"]
+
+
+def test_synthesize_verdict_with_no_progress_argument_is_unaffected(stub_llm_client):
+    bundle = _bundle()
+    llm = stub_llm_client([_themes(), _resolvable_draft()])
+
+    result = asyncio.run(synthesize_verdict(bundle, llm))
+
+    assert isinstance(result, Verdict)  # behaves exactly as before this story

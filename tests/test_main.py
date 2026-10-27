@@ -6,9 +6,12 @@ plus stub `ProductSource`/`LLMClient` implementations wired in via
 mirroring every prior story's "no live network calls in tests" rule.
 """
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
+from app import jobs as jobs_module
 from app.main import app, get_llm_client, get_product_source
 from app.models.llm import DraftVerdict, ThemeClusters
 from app.models.product import ProductFacts, SourceFailure, SourceTier
@@ -245,3 +248,129 @@ def test_get_product_source_and_get_llm_client_return_real_port_instances():
     `Settings()` -- never a stub, and never reconstructed per call."""
     assert isinstance(get_product_source(), ScraperTier2Source)
     assert isinstance(get_llm_client(), OpenAIClient)
+
+
+# -- GET /jobs and GET /jobs/{job_id}/events (Story 1.9, AD-10) -----------
+#
+# `with _client(...) as client:` (rather than a bare `_client(...)`) is
+# required here: both requests must run on the same persistent event loop
+# (`TestClient`'s blocking portal) so the `asyncio.create_task()` scheduled
+# by `GET /jobs` is still the same task `GET /jobs/{job_id}/events` waits
+# on -- a bare `TestClient(app)` call opens and tears down a fresh portal
+# per request.
+
+
+def _parse_sse_events(body: str) -> list[tuple[str | None, dict]]:
+    """Parse an SSE response body into a list of `(event, data)` pairs."""
+    events = []
+    for block in body.strip().split("\n\n"):
+        if not block:
+            continue
+        event_type = None
+        data = None
+        for line in block.split("\n"):
+            if line.startswith("event: "):
+                event_type = line[len("event: ") :]
+            elif line.startswith("data: "):
+                data = json.loads(line[len("data: ") :])
+        events.append((event_type, data))
+    return events
+
+
+def test_jobs_route_creates_job_and_returns_job_id():
+    client = _client(_StubSource(_facts()), _StubLLMClient([]))
+
+    response = client.get("/jobs", params={"url": VALID_URL})
+
+    assert response.status_code == 200
+    assert isinstance(response.json()["job_id"], str)
+    assert response.json()["job_id"]
+
+
+def test_jobs_route_with_no_url_param_is_a_clear_4xx_and_creates_no_job():
+    client = _client(_StubSource(_facts()), _StubLLMClient([]))
+    jobs_before = dict(jobs_module._jobs)
+
+    response = client.get("/jobs")
+
+    assert 400 <= response.status_code < 500
+    assert jobs_module._jobs == jobs_before
+
+
+def test_jobs_events_unknown_job_id_returns_404_not_a_hang():
+    client = _client(_StubSource(_facts()), _StubLLMClient([]))
+
+    response = client.get("/jobs/not-a-real-job-id/events")
+
+    assert response.status_code == 404
+
+
+def test_jobs_events_happy_path_streams_stage_events_then_result_then_closes():
+    facts = _facts(source_tier=SourceTier.TIER_2, review_count=25)
+    reviews = [_review()]
+    draft = DraftVerdict(
+        label=VerdictLabel.BUY,
+        confidence=0.9,
+        pros=[
+            ProConItem(
+                text="Great sound",
+                citation=Citation(
+                    source_type="review", source_index=0, quote="Great sound quality"
+                ),
+            )
+        ],
+        cons=[],
+        reasoning_summary="Positive signal.",
+    )
+    source = _StubSource(facts, reviews=reviews)
+    llm = _StubLLMClient([_themes(), draft])
+
+    with _client(source, llm) as client:
+        create_response = client.get("/jobs", params={"url": VALID_URL})
+        assert create_response.status_code == 200
+        job_id = create_response.json()["job_id"]
+
+        events_response = client.get(f"/jobs/{job_id}/events")
+
+    assert events_response.status_code == 200
+    assert events_response.headers["content-type"].startswith("text/event-stream")
+
+    events = _parse_sse_events(events_response.text)
+    assert len(events) >= 1
+
+    # Every event but the last is a `stage` event, in the order the stages
+    # actually ran; the last is exactly one `result` event.
+    *stage_events, result_event = events
+    for event_type, data in stage_events:
+        assert event_type == "stage"
+    assert [data["stage"] for _, data in stage_events] == [
+        "resolving_product",
+        "sampling_reviews",
+        "finding_alternatives",
+        "synthesizing_verdict",
+    ]
+
+    result_event_type, result_data = result_event
+    assert result_event_type == "result"
+    assert result_data["result_kind"] == "confident"
+    assert result_data["result"]["label"] == "BUY"
+
+
+def test_jobs_events_insufficient_data_path_carries_insufficient_data_result_kind():
+    failure = SourceFailure(source_tier=SourceTier.TIER_2, reason="fetch_failed", detail="blocked")
+    source = _StubSource(failure)
+    llm = _StubLLMClient([])
+
+    with _client(source, llm) as client:
+        create_response = client.get("/jobs", params={"url": VALID_URL})
+        job_id = create_response.json()["job_id"]
+
+        events_response = client.get(f"/jobs/{job_id}/events")
+
+    events = _parse_sse_events(events_response.text)
+    *_stage_events, result_event = events
+    result_event_type, result_data = result_event
+
+    assert result_event_type == "result"
+    assert result_data["result_kind"] == "insufficient_data"
+    assert result_data["result"]["reason"] == "fetch_failed"

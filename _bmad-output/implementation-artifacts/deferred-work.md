@@ -41,3 +41,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-8-view-the-verdict-on-one-screen.md`
   summary: No server-side timeout on the overall blocking `GET /` request while `produce_verdict()` runs.
   evidence: Extends the already-twice-deferred Story 1.2/1.6 finding (no aggregate timeout across sequential stage calls) one level further, to the HTTP route itself -- each underlying call already bounds itself (20s x up to 2 attempts per scraper call, 30s x up to 2 attempts per LLM call), so the aggregate worst case is large but finite, not an indefinite hang. If true, severity would be `medium` (a slow-but-not-hanging request). Revisit if/when Story 1.9's SSE work or real-world latency data makes this a priority.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-9-see-progress-instead-of-a-frozen-page.md`
+  summary: No SSE heartbeat/keep-alive between stage events on `GET /jobs/{job_id}/events`.
+  evidence: Real risk if ever deployed behind a reverse proxy with an idle-connection timeout (a common nginx/ALB default) -- a quiet stretch between stages (review sampling in particular) could be silently killed mid-stream. This project has no deployment target or proxy configuration yet to validate against, and a proper fix (a timeout-based heartbeat loop in `_stream_job_events()`) is a non-trivial control-flow change. If true, severity would be `medium` (a killed connection on a slow stage, not data loss -- the job keeps running server-side). Revisit once a real deployment topology is chosen.

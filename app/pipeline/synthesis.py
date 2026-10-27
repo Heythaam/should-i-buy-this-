@@ -39,6 +39,7 @@ from app.models.product import InsufficientDataResult
 from app.models.verdict import Citation, EvidenceBasis, ProConItem, Verdict
 from app.pipeline.confidence import compute_confidence
 from app.pipeline.llm_client import LLMClient
+from app.pipeline.progress import NullProgressPublisher, ProgressPublisher
 from app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -219,14 +220,22 @@ def _build_synthesis_user_prompt(bundle: EvidenceBundle, themes: ThemeClusters) 
 
 
 async def synthesize_verdict(
-    bundle: EvidenceBundle, llm: LLMClient
+    bundle: EvidenceBundle,
+    llm: LLMClient,
+    progress: ProgressPublisher | None = None,
 ) -> Verdict | InsufficientDataResult:
     """Synthesize a schema-validated `Verdict` from `bundle`, or fail honestly.
 
     Never raises (AD-4, AD-9): any `LLMCallFailure` from either call, and
     both attempts leaving zero resolvable pros/cons, both resolve to
     `InsufficientDataResult`.
+
+    Publishes `"synthesizing_verdict"` on entry when `progress` is given
+    (Story 1.9, AD-10); a complete no-op otherwise.
     """
+    publisher = progress if progress is not None else NullProgressPublisher()
+    await publisher.publish("synthesizing_verdict")
+
     settings = Settings()
 
     theme_result = await llm.complete(

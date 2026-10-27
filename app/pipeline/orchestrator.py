@@ -24,9 +24,12 @@ confidence -> `Verdict`. It short-circuits on an `InsufficientDataResult`
 from either stage -- a failed/insufficient Evidence Bundle never reaches
 `synthesize_verdict()` (AD-4).
 
-Intentionally minimal (three functions) rather than building out
-job/queue/SSE machinery now -- that belongs to Story 1.9 (AD-10); AD-11 lets
-that story extend this same file in place.
+Story 1.9 (AD-10) extends this file in place (AD-11) with an additive
+`progress: ProgressPublisher | None = None` parameter on each function
+below: each publishes its own stage name on entry when a publisher is
+given, and is a complete no-op when `progress` is `None` (the
+`NullProgressPublisher` default) -- every existing call site/test that
+doesn't pass it keeps working unchanged.
 """
 
 import logging
@@ -37,6 +40,7 @@ from app.models.verdict import Verdict
 from app.pipeline.alternatives import select_alternatives
 from app.pipeline.canonicalize import InvalidProductURLError, canonicalize
 from app.pipeline.llm_client import LLMClient
+from app.pipeline.progress import NullProgressPublisher, ProgressPublisher
 from app.pipeline.review_sampling import sample_reviews
 from app.pipeline.review_signal import assess_review_signal
 from app.pipeline.sources.base import ProductSource
@@ -46,7 +50,9 @@ logger = logging.getLogger(__name__)
 
 
 async def resolve_product_facts(
-    url: str, source: ProductSource
+    url: str,
+    source: ProductSource,
+    progress: ProgressPublisher | None = None,
 ) -> ProductFacts | InsufficientDataResult:
     """Resolve `url` to `ProductFacts`, or an honest `InsufficientDataResult`.
 
@@ -55,7 +61,13 @@ async def resolve_product_facts(
     layout) both map to `InsufficientDataResult` instead of propagating.
     `source` is injected rather than constructed here, so a future Tier 1/3
     source can be passed in without changing this function.
+
+    Publishes `"resolving_product"` on entry when `progress` is given
+    (Story 1.9, AD-10); a complete no-op otherwise.
     """
+    publisher = progress if progress is not None else NullProgressPublisher()
+    await publisher.publish("resolving_product")
+
     try:
         canonicalize(url)
     except InvalidProductURLError as exc:
@@ -81,7 +93,9 @@ async def resolve_product_facts(
 
 
 async def assemble_evidence_bundle(
-    url: str, source: ProductSource
+    url: str,
+    source: ProductSource,
+    progress: ProgressPublisher | None = None,
 ) -> EvidenceBundle | InsufficientDataResult:
     """Assemble the one `EvidenceBundle` a future Verdict is grounded in.
 
@@ -96,13 +110,21 @@ async def assemble_evidence_bundle(
     result (no reviews, low review signal, no alternatives) is carried
     through into the bundle as-is -- this function adds no interpretation of
     its own.
+
+    Threads `progress` into `resolve_product_facts()` and additionally
+    publishes `"sampling_reviews"` before `fetch_reviews()` and
+    `"finding_alternatives"` before `find_candidate_alternatives()` (Story
+    1.9, AD-10); a complete no-op when `progress` is `None`.
     """
-    facts_or_insufficient = await resolve_product_facts(url, source)
+    publisher = progress if progress is not None else NullProgressPublisher()
+
+    facts_or_insufficient = await resolve_product_facts(url, source, progress)
     if isinstance(facts_or_insufficient, InsufficientDataResult):
         return facts_or_insufficient
 
     facts = facts_or_insufficient
 
+    await publisher.publish("sampling_reviews")
     reviews = await source.fetch_reviews(url)
     if not reviews:
         logger.warning("assemble_evidence_bundle: no_reviews_found for %s", url)
@@ -123,6 +145,7 @@ async def assemble_evidence_bundle(
     # `facts.category` may be `None` or `""` here; `find_candidate_alternatives()`
     # already guards both cases (Story 1.5) and returns `[]` rather than
     # raising, so no extra guard is needed at this call site.
+    await publisher.publish("finding_alternatives")
     candidates = await source.find_candidate_alternatives(facts.category)
     alternatives = select_alternatives(facts, candidates)
     if not alternatives:
@@ -137,7 +160,10 @@ async def assemble_evidence_bundle(
 
 
 async def produce_verdict(
-    url: str, source: ProductSource, llm: LLMClient
+    url: str,
+    source: ProductSource,
+    llm: LLMClient,
+    progress: ProgressPublisher | None = None,
 ) -> Verdict | InsufficientDataResult:
     """Run the complete end-to-end v1 pipeline for `url`.
 
@@ -146,9 +172,12 @@ async def produce_verdict(
     or insufficient Evidence Bundle is returned unchanged, before
     `synthesize_verdict()` (and therefore any LLM call) is ever invoked
     (AD-4).
+
+    Threads `progress` into both sub-calls (Story 1.9, AD-10) -- a complete
+    no-op when `progress` is `None`.
     """
-    bundle_or_insufficient = await assemble_evidence_bundle(url, source)
+    bundle_or_insufficient = await assemble_evidence_bundle(url, source, progress)
     if isinstance(bundle_or_insufficient, InsufficientDataResult):
         return bundle_or_insufficient
 
-    return await synthesize_verdict(bundle_or_insufficient, llm)
+    return await synthesize_verdict(bundle_or_insufficient, llm, progress)

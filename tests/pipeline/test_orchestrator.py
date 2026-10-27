@@ -341,3 +341,99 @@ def test_produce_verdict_returns_insufficient_data_when_synthesis_fails(stub_llm
 
     assert isinstance(result, InsufficientDataResult)
     assert result.reason == "llm_call_failed"
+
+
+# -- progress publishing (Story 1.9, AD-10) -------------------------------
+#
+# A stub `ProgressPublisher` that records every stage name it was called
+# with, in call order -- used to assert each function publishes its
+# documented stage name(s), and that omitting `progress` entirely still
+# behaves exactly as before this story (covered by every test above, none
+# of which pass a `progress` argument).
+
+
+class _StubProgressPublisher:
+    def __init__(self) -> None:
+        self.stages: list[str] = []
+
+    async def publish(self, stage: str) -> None:
+        self.stages.append(stage)
+
+
+def test_resolve_product_facts_publishes_resolving_product_stage():
+    source = _StubSource(_facts())
+    publisher = _StubProgressPublisher()
+
+    asyncio.run(resolve_product_facts(VALID_URL, source, publisher))
+
+    assert publisher.stages == ["resolving_product"]
+
+
+def test_resolve_product_facts_with_no_progress_argument_is_unaffected():
+    source = _StubSource(_facts())
+
+    result = asyncio.run(resolve_product_facts(VALID_URL, source))
+
+    assert result is not None  # behaves exactly as before this story
+
+
+def test_assemble_evidence_bundle_publishes_stages_in_order():
+    facts = _facts(category="Smart Speakers", review_count=25)
+    source = _StubSource(facts, reviews=[_review()], alternatives=[])
+    publisher = _StubProgressPublisher()
+
+    result = asyncio.run(assemble_evidence_bundle(VALID_URL, source, publisher))
+
+    assert isinstance(result, EvidenceBundle)
+    assert publisher.stages == [
+        "resolving_product",
+        "sampling_reviews",
+        "finding_alternatives",
+    ]
+
+
+def test_assemble_evidence_bundle_short_circuit_publishes_only_resolving_product():
+    failure = SourceFailure(source_tier=SourceTier.TIER_2, reason="fetch_failed")
+    source = _StubSource(failure)
+    publisher = _StubProgressPublisher()
+
+    result = asyncio.run(assemble_evidence_bundle(VALID_URL, source, publisher))
+
+    assert isinstance(result, InsufficientDataResult)
+    assert publisher.stages == ["resolving_product"]
+
+
+def test_assemble_evidence_bundle_with_no_progress_argument_is_unaffected():
+    facts = _facts(category="Smart Speakers", review_count=25)
+    source = _StubSource(facts, reviews=[_review()])
+
+    result = asyncio.run(assemble_evidence_bundle(VALID_URL, source))
+
+    assert isinstance(result, EvidenceBundle)
+
+
+def test_produce_verdict_publishes_every_stage_in_order(stub_llm_client):
+    facts = _facts(category="Smart Speakers", review_count=25)
+    source = _StubSource(facts, reviews=[_review()])
+    llm = stub_llm_client([_themes(), _resolvable_draft()])
+    publisher = _StubProgressPublisher()
+
+    result = asyncio.run(produce_verdict(VALID_URL, source, llm, publisher))
+
+    assert isinstance(result, Verdict)
+    assert publisher.stages == [
+        "resolving_product",
+        "sampling_reviews",
+        "finding_alternatives",
+        "synthesizing_verdict",
+    ]
+
+
+def test_produce_verdict_with_no_progress_argument_is_unaffected(stub_llm_client):
+    facts = _facts(category="Smart Speakers", review_count=25)
+    source = _StubSource(facts, reviews=[_review()])
+    llm = stub_llm_client([_themes(), _resolvable_draft()])
+
+    result = asyncio.run(produce_verdict(VALID_URL, source, llm))
+
+    assert isinstance(result, Verdict)

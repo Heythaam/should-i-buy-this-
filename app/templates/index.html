@@ -24,6 +24,9 @@
             <button type="submit">Get the verdict</button>
         </form>
 
+        <div id="progress" aria-live="polite"></div>
+        <div id="result-mount"></div>
+
         {% if result is not none %}
         <section class="result result--{{ result_kind }}">
             {% if result_kind == "insufficient_data" %}
@@ -93,5 +96,6 @@
         </section>
         {% endif %}
     </main>
+    <script src="/static/app.js" defer></script>
 </body>
 </html>
