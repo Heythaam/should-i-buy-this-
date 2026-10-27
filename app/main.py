@@ -34,6 +34,9 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from app.jobs import CLOSE_SENTINEL, create_job, get_job_queue, remove_job, run_job
 from app.models.product import InsufficientDataResult
@@ -60,6 +63,15 @@ _llm_client = OpenAIClient(_settings)
 app = FastAPI(title="Should I Buy This?")
 app.mount("/static", StaticFiles(directory=_APP_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=_APP_DIR / "templates")
+
+# `GET /jobs` triggers a real scrape plus up to 3 billed OpenAI calls per
+# request, with no auth -- rate limiting it is the minimum guard against
+# runaway cost from repeat/abusive hits. Per-client-IP, in-memory (no shared
+# store needed for this single-process app). `limiter.reset()` exists
+# specifically so tests can clear accumulated state between cases.
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Holds every `run_job()` background task while it runs. `asyncio.create_task()`
 # on its own leaves the event loop holding only a weak reference to the task
@@ -163,7 +175,9 @@ async def _stream_job_events(job_id: str, queue: "asyncio.Queue") -> AsyncIterat
 
 
 @app.get("/jobs")
+@limiter.limit("5/minute")
 async def create_job_route(
+    request: Request,
     url: str,
     source: ProductSource = Depends(get_product_source),
     llm: LLMClient = Depends(get_llm_client),
@@ -179,6 +193,11 @@ async def create_job_route(
     `asyncio.create_task()` on its own leaves the event loop holding only a
     weak reference, so an unreferenced task can otherwise be garbage
     collected mid-run.
+
+    Rate-limited to 5 requests/minute per client IP (`request` is required
+    by `@limiter.limit` to inspect the caller's address) -- this endpoint
+    triggers a real scrape plus billed OpenAI calls, so an unbounded caller
+    could otherwise run up real cost with no other guard in front of it.
     """
     job_id = create_job()
     task = asyncio.create_task(run_job(job_id, url, source, llm))

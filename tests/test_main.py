@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import jobs as jobs_module
-from app.main import app, get_llm_client, get_product_source
+from app.main import app, get_llm_client, get_product_source, limiter
 from app.models.llm import DraftVerdict, ThemeClusters
 from app.models.product import ProductFacts, SourceFailure, SourceTier
 from app.models.review import Review
@@ -63,6 +63,17 @@ class _StubLLMClient:
 def _clear_dependency_overrides():
     yield
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """`/jobs` is rate-limited (5/minute/IP); every `TestClient` request
+    looks like it comes from the same address, so without a reset here,
+    state would accumulate *across* test cases -- not just within one --
+    and unrelated later tests would start seeing 429s."""
+    limiter.reset()
+    yield
+    limiter.reset()
 
 
 def _client(source, llm) -> TestClient:
@@ -285,6 +296,20 @@ def test_jobs_route_creates_job_and_returns_job_id():
     assert response.status_code == 200
     assert isinstance(response.json()["job_id"], str)
     assert response.json()["job_id"]
+
+
+def test_jobs_route_is_rate_limited_to_five_per_minute():
+    # GET /jobs triggers a real scrape plus billed OpenAI calls with no
+    # auth -- the 6th request within a minute from the same client must be
+    # rejected rather than silently queued, or an unbounded caller could run
+    # up real cost with nothing else standing in the way.
+    client = _client(_StubSource(_facts()), _StubLLMClient([]))
+
+    responses = [client.get("/jobs", params={"url": VALID_URL}) for _ in range(5)]
+    assert all(r.status_code == 200 for r in responses)
+
+    sixth = client.get("/jobs", params={"url": VALID_URL})
+    assert sixth.status_code == 429
 
 
 def test_jobs_route_with_no_url_param_is_a_clear_4xx_and_creates_no_job():
