@@ -22,11 +22,22 @@ below: a per-job `asyncio.Queue`-backed event stream so the client can see
 per-stage progress instead of a frozen page during the ~20-30s pipeline run.
 `GET /` above is untouched and remains the no-JS fallback -- it still blocks
 until `produce_verdict()` resolves, exactly as before this story.
+
+On Windows, the default `SelectorEventLoop` cannot create subprocesses
+(`loop.subprocess_exec` raises `NotImplementedError`), which Playwright's
+browser launch (`ScraperTier2Source._render()`) requires. The module-level
+`asyncio.set_event_loop_policy()` call below switches to
+`WindowsProactorEventLoopPolicy`, which does support subprocesses, before
+any event loop is created -- it must run at import time, before uvicorn (or
+any other ASGI server) creates its own loop. A no-op on every other
+platform (see this change's note in `deferred-work.md`: this specific
+failure mode is Windows-only).
 """
 
 import asyncio
 import json
 import logging
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -37,6 +48,9 @@ from fastapi.templating import Jinja2Templates
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from app.jobs import CLOSE_SENTINEL, create_job, get_job_queue, remove_job, run_job
 from app.models.product import InsufficientDataResult

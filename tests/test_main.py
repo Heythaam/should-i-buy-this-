@@ -6,7 +6,9 @@ plus stub `ProductSource`/`LLMClient` implementations wired in via
 mirroring every prior story's "no live network calls in tests" rule.
 """
 
+import asyncio
 import json
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -399,3 +401,20 @@ def test_jobs_events_insufficient_data_path_carries_insufficient_data_result_kin
     assert result_event_type == "result"
     assert result_data["result_kind"] == "insufficient_data"
     assert result_data["result"]["reason"] == "fetch_failed"
+
+
+# -- Windows event loop policy (Playwright subprocess support) -------------
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="WindowsProactorEventLoopPolicy only exists/applies on win32",
+)
+def test_importing_app_main_sets_the_windows_proactor_event_loop_policy():
+    # Importing `app.main` (done at module load time by this file, and by
+    # every other test module that imports `app`) must leave the process
+    # on `WindowsProactorEventLoopPolicy` -- `SelectorEventLoopPolicy` (the
+    # Windows default) cannot create subprocesses, which Playwright's
+    # browser launch requires, and raises `NotImplementedError` instead.
+    policy = asyncio.get_event_loop_policy()
+    assert isinstance(policy, asyncio.WindowsProactorEventLoopPolicy)
