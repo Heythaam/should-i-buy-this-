@@ -332,7 +332,7 @@ def test_scraper_launches_through_configured_proxy(monkeypatch):
             return None
 
     class _FakeChromium:
-        async def launch(self, proxy=None):
+        async def launch(self, proxy=None, executable_path=None):
             launched_with["proxy"] = proxy
             return _FakeBrowser()
 

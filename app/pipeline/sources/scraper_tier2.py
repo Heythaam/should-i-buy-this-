@@ -532,7 +532,8 @@ class ScraperTier2Source:
     ) -> str:
         proxy = build_proxy_config(self._settings.scraper_proxy_url)
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(proxy=proxy)
+            executable_path = self._settings.playwright_executable_path or None
+            browser = await playwright.chromium.launch(proxy=proxy, executable_path=executable_path)
             try:
                 page = await browser.new_page()
                 await page.goto(url, wait_until="domcontentloaded")

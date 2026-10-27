@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     scraper_proxy_url: str | None = None
+    playwright_executable_path: str | None = None
 
     # llm-synthesis branch (Story 1.7, NFR-1): the OpenAI API key and both
     # model names load only from here -- never hardcoded, never logged.
