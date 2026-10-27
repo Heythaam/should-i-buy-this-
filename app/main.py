@@ -54,8 +54,8 @@ _APP_DIR = Path(__file__).resolve().parent
 
 # Built once at import time (NFR-1) -- never per-request. A per-request
 # `Settings()` in a `Depends` provider would re-run its validators (e.g.
-# `_validate_scraper_proxy_url`) on every request, so a single malformed env
-# var would crash every request, including a plain form-only `GET /`.
+# `_validate_optional_url`) on every request, so a single malformed env var
+# would crash every request, including a plain form-only `GET /`.
 _settings = Settings()
 _product_source = ScraperTier2Source(_settings)
 _llm_client = OpenAIClient(_settings)

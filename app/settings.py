@@ -10,7 +10,7 @@ field the Tier 2 scraper needs.
 
 from urllib.parse import urlparse
 
-from pydantic import field_validator
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,12 +25,20 @@ class Settings(BaseSettings):
     llm_cheap_model: str = "gpt-4o-mini"
     llm_strong_model: str = "gpt-4o"
 
-    @field_validator("scraper_proxy_url")
+    # Optional override of the OpenAI SDK's default base URL, so an
+    # OpenAI-compatible API (Groq, etc.) can be used by setting this in
+    # `.env` alone -- wired into `OpenAIClient`'s `AsyncOpenAI(...)`
+    # construction in `pipeline/llm_client.py`. `None` keeps the SDK's own
+    # default (api.openai.com).
+    openai_base_url: str | None = None
+
+    @field_validator("scraper_proxy_url", "openai_base_url")
     @classmethod
-    def _validate_scraper_proxy_url(cls, value: str | None) -> str | None:
+    def _validate_optional_url(cls, value: str | None, info: ValidationInfo) -> str | None:
         """Fail fast here, at construction time, rather than deep inside
-        Playwright's `browser.launch()` in `_render` when the value turns
-        out to be malformed (missing scheme, stray whitespace, etc.).
+        Playwright's `browser.launch()` or the OpenAI SDK's HTTP client when
+        the value turns out to be malformed (missing scheme, stray
+        whitespace, etc.). Shared by every optional-URL setting field.
 
         Note: `pydantic.AnyUrl` was considered instead of this validator but
         rejected -- it parses a scheme-less value like "proxy.example.com:8080"
@@ -44,17 +52,17 @@ class Settings(BaseSettings):
             return None
         parsed = urlparse(value)
         if not parsed.scheme or not parsed.netloc:
-            raise ValueError(
-                f"SCRAPER_PROXY_URL is not a valid URL (missing scheme or host): {value!r}"
-            )
+            env_var = info.field_name.upper()
+            raise ValueError(f"{env_var} is not a valid URL (missing scheme or host): {value!r}")
         return value
 
     @field_validator("openai_api_key")
     @classmethod
     def _validate_openai_api_key(cls, value: str | None) -> str | None:
         """Normalize an empty/whitespace-only value to `None`, matching
-        `_validate_scraper_proxy_url`'s pattern -- an env var set to "" should
-        behave the same as it being unset, not as a truthy empty key."""
+        `_validate_optional_url`'s normalize-to-`None` pattern -- an env var
+        set to "" should behave the same as it being unset, not as a truthy
+        empty key."""
         if value is None:
             return None
         value = value.strip()

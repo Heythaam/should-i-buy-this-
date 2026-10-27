@@ -68,7 +68,10 @@ class OpenAIClient:
 
     def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
-            self._client = AsyncOpenAI(api_key=self._settings.openai_api_key)
+            self._client = AsyncOpenAI(
+                api_key=self._settings.openai_api_key,
+                base_url=self._settings.openai_base_url,
+            )
         return self._client
 
     async def complete(
