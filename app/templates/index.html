@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Should I Buy This?</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+</head>
+<body>
+    <main>
+        <h1>Should I Buy This?</h1>
+        <p class="tagline">Paste an Amazon product URL and get a grounded Buy / Skip / Wait verdict.</p>
+
+        <form method="get" action="/" class="url-form">
+            <label for="url">Product URL</label>
+            <input
+                type="text"
+                id="url"
+                name="url"
+                placeholder="https://www.amazon.com/dp/..."
+                value="{{ url or '' }}"
+                required
+            >
+            <button type="submit">Get the verdict</button>
+        </form>
+
+        {% if result is not none %}
+        <section class="result result--{{ result_kind }}">
+            {% if result_kind == "insufficient_data" %}
+                <h2>Insufficient data</h2>
+                <p class="reason">Reason: {{ result.reason }}</p>
+                {% if result.detail %}
+                    <p class="detail">{{ result.detail }}</p>
+                {% endif %}
+                {% if result.source_tier %}
+                    <p class="source-tier">Source tier attempted: {{ result.source_tier.value }}</p>
+                {% endif %}
+            {% else %}
+                <h2 class="label label--{{ result.label.value | lower }}">{{ result.label.value }}</h2>
+
+                <p class="confidence">
+                    Confidence: {{ (result.confidence * 100) | round | int }}%
+                    &mdash; based on {{ result.evidence_basis.review_count }} review(s)
+                    {% if result.evidence_basis.is_low_signal %}(low review signal){% endif %},
+                    {{ result.evidence_basis.alternatives_count }} alternative(s) found,
+                    via {{ result.evidence_basis.source_tier.value }} source.
+                    {% if result_kind == "low_confidence" %}
+                        <span class="low-confidence-flag">This is a low-confidence verdict.</span>
+                    {% endif %}
+                </p>
+
+                <p class="reasoning-summary">{{ result.reasoning_summary }}</p>
+
+                <h3>Pros</h3>
+                {% if result.pros %}
+                <ul class="pros">
+                    {% for item in result.pros %}
+                    <li>
+                        <p class="claim">{{ item.text }}</p>
+                        <p class="citation">Source: &ldquo;{{ item.citation.quote }}&rdquo; ({{ item.citation.source_type }})</p>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="empty">No pros were resolvable from the evidence.</p>
+                {% endif %}
+
+                <h3>Cons</h3>
+                {% if result.cons %}
+                <ul class="cons">
+                    {% for item in result.cons %}
+                    <li>
+                        <p class="claim">{{ item.text }}</p>
+                        <p class="citation">Source: &ldquo;{{ item.citation.quote }}&rdquo; ({{ item.citation.source_type }})</p>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="empty">No cons were resolvable from the evidence.</p>
+                {% endif %}
+
+                <h3>Alternatives</h3>
+                {% if result.alternatives %}
+                <ul class="alternatives">
+                    {% for alt in result.alternatives %}
+                    <li>{{ alt.title }}{% if alt.price is not none %} &mdash; ${{ "%.2f"|format(alt.price) }}{% endif %}</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="empty">No alternatives were found.</p>
+                {% endif %}
+            {% endif %}
+        </section>
+        {% endif %}
+    </main>
+</body>
+</html>
